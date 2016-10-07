@@ -1,8 +1,5 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-"""
-   author daniel.piri@artesyn.com
-"""
 
 from __future__ import print_function
 import visa
