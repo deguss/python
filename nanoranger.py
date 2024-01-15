@@ -3,6 +3,7 @@ import numpy as np
 import tkinter as tk
 import collections
 import math
+import datetime as dt
 
 from engfmt import Quantity, quant_to_eng
 import time, threading
@@ -10,6 +11,7 @@ CALLBACK_SECONDS = 1
 BUFFERSIZE=10000
 from serial.tools.list_ports import comports
 import serial
+
 #----------------------------------------------------------
 class NanoRanger(tk.Frame):
 #----------------------------------------------------------    
@@ -20,6 +22,8 @@ class NanoRanger(tk.Frame):
         self.timeout=0
         self.tim=0
         self.resetBuf(BUFFERSIZE)
+        self.ofname='nr_data'
+        self.ofhandle=None
         
         self.ports=[]
         for port in comports():
@@ -112,11 +116,21 @@ class NanoRanger(tk.Frame):
             self.timeout=0
             self.serClose()
             
-
+    def saveButtonAction(self):
+        if self.ofhandle == None:
+            self.ofhandle = open(self.ofname+dt.datetime.strftime(dt.datetime.utcnow(),'%H%M')+'.txt','w')
+            self.parent.saveButton.config(text='Stop saving data')
+        else:
+            self.ofhandle.close()
+            self.ofhandle = None
+            self.parent.saveButton.config(text='Start saving data')
+        
     def addSample(self, f):
         self.cbuf.append(f)
         m=quant_to_eng(f,'A')
-        self.dispLabel.configure(text=m)        
+        self.dispLabel.configure(text=m)
+        if self.ofhandle is not None:
+            self.ofhandle.write('{} {}\n'.format(dt.datetime.utcnow(),f))
 
     def resetBuf(self, bufferSize):
         self.cbuf=collections.deque(maxlen=int(bufferSize)) #reinit circ buffer
@@ -177,6 +191,9 @@ class App():
 
         startButton = tk.Button(window, text="stop", command=self.stop)
         startButton.pack(padx=10)
+        
+        frame.saveButton = tk.Button(window, text="Start saving data", command=self.nano.saveButtonAction)
+        frame.saveButton.pack(padx=10)
 
         window.mainloop()
 
