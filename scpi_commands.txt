@@ -1,0 +1,13 @@
+COMM_HEADER OFF
+C1:CPL? coupling-> D1M, A1M, D50, GND, OVL
+FSCR ON full screen on
+MSIZ? memory size-> 50K
+TDIV? -> 2E-6
+VDIV? -> 2E-3 = 2mV/div NOT including the probe atten.
+MSG 'connect probe 1'
+C1:OFST?
+PROBE_NAME? -> "", "x10"
+
+Waveform transfer:
+scope.query_binary_values("C1:WF? DAT1")
+
