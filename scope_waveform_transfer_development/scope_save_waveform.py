@@ -266,6 +266,7 @@ axs[ind][0].set(xlabel='time (s)', ylabel='Amplitude (V)')
 axs[0][0].set_title("<enter title>   "+overflow +" "+ bwl +" @"+ time_string)
 axs[ind][0].grid()
 plt.xlim(min(t), max(t))
+plt.pause(1) # Introduce a short delay for the plot to display
 
 plt.show(block=False)  # Show plot in a non-blocking way
 plt.pause(1) # Introduce a short delay for the plot to display
