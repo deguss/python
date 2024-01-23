@@ -1,0 +1,15 @@
+WIN+R
+cmd
+cd /D D:/python/python-vxi11
+python setup.py install
+
+
+python -m pip install pyvisa 
+pyserial 
+pyusb
+matplotlib
+pyvisa-py
+psutil
+zeroconf
+Cython
+pyvicp
