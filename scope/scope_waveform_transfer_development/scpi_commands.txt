@@ -1,0 +1,22 @@
+COMM_HEADER OFF
+C1:CPL? coupling-> D1M, A1M, D50, GND, OVL
+FSCR ON full screen on
+MSIZ? memory size-> 50K
+TDIV? -> 2E-6
+VDIV? -> 2E-3 = 2mV/div NOT including the probe atten.
+MSG 'connect probe 1'
+C1:OFST?
+PROBE_NAME? -> "", "x10"
+
+scope.query("C1:PAVA? MAX")
+
+Waveform transfer:
+c1 = scope.query_binary_values("C1:WF? DAT1", datatype='h', container=np.array, is_big_endian=True)
+
+C1:PAVA?MAX instructs the oscilloscope to evaluate the maximum
+data value in the Channel 1 waveform.
+
+scope.query("C1:INSP? 'TRIGGER_TIME'") ->
+"TRIGGER_TIME       : Date = JAN 23, 2024, Time = 12:36:12.8485"
+
+"WAVE_ARRAY_COUNT   : 50002              "
