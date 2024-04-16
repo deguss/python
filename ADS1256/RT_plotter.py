@@ -4,8 +4,8 @@ import tkinter as tk
 import collections
 import math
 import datetime as dt
+import pdb
 
-from engfmt import Quantity, quant_to_eng
 import time, threading
 CALLBACK_SECONDS = 1
 BUFFERSIZE=10000
@@ -143,8 +143,7 @@ class ADS1256(tk.Frame):
 
                         if len(adc_data_bytes) == bytes_needed:
                             adc_data = struct.unpack('<{}i'.format(self.length), adc_data_bytes)
-                            print(adc_data)
-                            self.addSample(adc_data)
+                            self.addSamples(adc_data)
                         else:
                             self.msg("Insufficient data to unpack")
                     else:
@@ -176,7 +175,7 @@ class ADS1256(tk.Frame):
             self.ofhandle = None
             self.parent.saveButton.config(text='start saving data')
         
-    def addSample(self, f):
+    def addSamples(self, f):
         self.cbuf.append(f)
         if self.ofhandle is not None:
             self.ofhandle.write('{} {}\n'.format(dt.datetime.utcnow(),f))
@@ -226,12 +225,11 @@ class ADS1256(tk.Frame):
 
 
 
-UPDATE_RATE = 1
+UPDATE_RATE = 500
 class App():
     def __init__(self):
-        self.running = 0
         self.window = tk.Tk()
-        self.window.geometry("1000x400")
+        self.window.geometry("900x350")
         self.window.title("Explore ADS1256")
         
         frame = tk.Frame(master=self.window, height=250, width=250, highlightbackground="gray", highlightthickness=1)
@@ -248,43 +246,56 @@ class App():
         startButton = tk.Button(self.window, text="start real-time view", command=self.draw)
         startButton.pack(side=tk.RIGHT, padx=10)
 
-        startButton = tk.Button(self.window, text="stop", command=self.stop)
-        startButton.pack(side=tk.RIGHT, padx=10)
+        stopButton = tk.Button(self.window, text="stop", command=self.stop)
+        stopButton.pack(side=tk.RIGHT, padx=10)
+
+        rstButton = tk.Button(self.window, text="reset view", command=self.rst)
+        rstButton.pack(side=tk.RIGHT, padx=10)
         
         frame.saveButton = tk.Button(self.window, text="start saving data", command=self.ads.saveButtonAction)
         frame.saveButton.pack(side=tk.RIGHT, padx=10)
 
+        plt.ion() #turn interactive plotting off
+        
+        self.timer = []
+        
         self.window.mainloop()
 
+
+
     def draw(self):
-        plt.ion() #turn interactive plotting off
         self.fig = plt.figure()
         self.ax = self.fig.add_subplot(111)
         self.line1, = self.ax.plot(0, 0, '.r') # Returns a tuple of line objects, thus the comma
-        #plt.close()
-        t1 = threading.Timer(UPDATE_RATE, self.updatePlot)
-        t1.start()
-        self.running=1
         
+        self.fig.canvas.draw()  # draw the initial plot
+        self.fig.canvas.flush_events()
+        self.timer = self.fig.canvas.new_timer(interval=UPDATE_RATE) # set up a timer to update the plot
+        self.timer.add_callback(self.updatePlot)
+        self.timer.start()
+            
+            
     def updatePlot(self):
-        if (self.running):
-            t1 = threading.Timer(UPDATE_RATE, self.updatePlot)
-            t1.start()
-                
-        d=self.ads.getBuf()
-        self.line1.set_xdata(np.linspace(0,len(d),len(d)))
+        text = self.boxes[2].cget("text")  # Get the text from box[1]
+        sps = int(text.split("Hz")[0])
+        
+        d=self.ads.getBuf()        
+        self.line1.set_xdata(np.linspace(0,1/sps*np.size(d),np.size(d)))
         self.line1.set_ydata(d)
-        
-        #ax=plt.gca()
         self.ax.relim()
-        self.ax.autoscale_view()
-        
+        self.ax.autoscale_view()        
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
-
+        
     def stop(self):
-        self.running = 0
+        self.timer.stop()
 
+
+    def rst(self):
+        self.ads.resetBuf(BUFFERSIZE)
+        self.line1.set_xdata([])
+        self.line1.set_ydata([])
+ 
         
 
         

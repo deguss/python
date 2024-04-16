@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
 import pyvisa
-rm = pyvisa.ResourceManager()
+rm = pyvisa.ResourceManager('@py')
 
 ip = "192.168.1.12"
 
@@ -57,8 +57,9 @@ except TimeoutError as error:
     print("consider rebooting the scope!")
     rm.close()
     exit()
-except Exception:
+except Exception as e:
     print("could not connect on "+ip)
+    print(e)
     rm.close()
     exit()
 

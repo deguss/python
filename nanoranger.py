@@ -8,7 +8,7 @@ import datetime as dt
 from engfmt import Quantity, quant_to_eng
 import time, threading
 CALLBACK_SECONDS = 1
-BUFFERSIZE=10000
+BUFFERSIZE=3600*3
 from serial.tools.list_ports import comports
 import serial
 
@@ -178,45 +178,43 @@ UPDATE_RATE = 1
 class App():
     def __init__(self):
         self.running = 0
-        window = tk.Tk()
-        window.geometry("700x400")
-        window.title("Explore NanoRanger")
+        self.window = tk.Tk()
+        self.window.geometry("700x400")
+        self.window.title("Explore NanoRanger")
         
-        frame = tk.Frame(master=window, height=250, width=250, highlightbackground="gray", highlightthickness=1)
+        frame = tk.Frame(master=self.window, height=250, width=250, highlightbackground="gray", highlightthickness=1)
         frame.pack(side=tk.LEFT, padx=10, pady=10)
         self.nano = NanoRanger(frame)
 
-        startButton = tk.Button(window, text="start real-time view", command=self.draw)
+        startButton = tk.Button(self.window, text="start real-time view", command=self.draw)
         startButton.pack(side=tk.BOTTOM, padx=10)
 
-        startButton = tk.Button(window, text="stop", command=self.stop)
+        startButton = tk.Button(self.window, text="stop", command=self.stop)
         startButton.pack(padx=10)
         
-        frame.saveButton = tk.Button(window, text="Start saving data", command=self.nano.saveButtonAction)
+        frame.saveButton = tk.Button(self.window, text="Start saving data", command=self.nano.saveButtonAction)
         frame.saveButton.pack(padx=10)
 
-        window.mainloop()
+        plt.ion()
+        self.timer = []
+        self.window.mainloop()
 
     def draw(self):
-        plt.ion() #turn interactive plotting off
         self.fig = plt.figure()
         self.ax = self.fig.add_subplot(111)
         self.line1, = self.ax.plot(0, 0, '.r') # Returns a tuple of line objects, thus the comma
-        #plt.close()
-        t1 = threading.Timer(UPDATE_RATE, self.updatePlot)
-        t1.start()
-        self.running=1
+        
+        self.fig.canvas.draw()  # draw the initial plot
+        self.fig.canvas.flush_events()
+        self.timer = self.fig.canvas.new_timer(interval=UPDATE_RATE) # set up a timer to update the plot
+        self.timer.add_callback(self.updatePlot)
+        self.timer.start()
         
     def updatePlot(self):
-        if (self.running):
-            t1 = threading.Timer(UPDATE_RATE, self.updatePlot)
-            t1.start()
-                
         d=self.nano.getBuf()
         self.line1.set_xdata(np.linspace(0,len(d)/0.3,len(d)))
         self.line1.set_ydata(d)
         
-        #ax=plt.gca()
         self.ax.relim()
         self.ax.autoscale_view()
         
@@ -224,7 +222,7 @@ class App():
         self.fig.canvas.flush_events()
 
     def stop(self):
-        self.running = 0
+        self.timer.stop()
 
         
 
