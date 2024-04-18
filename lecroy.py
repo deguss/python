@@ -1,13 +1,15 @@
 import pdb
 import numpy as np
 import re
-
+import atexit
 import tkinter as tk
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-
+import threading
+import time
 import pyvisa
-
+from datetime import datetime
+from functools import lru_cache
 
 #----------------------------------------------------------
 class Lecroy(tk.Frame):
@@ -21,7 +23,10 @@ class Lecroy(tk.Frame):
 
         self.ch1=[]
         self.ch2=[]
-        self.t=[]
+        self.dt=0
+        self.tim=None
+
+        atexit.register(self.closeDev)
 
         self.initUI()
 
@@ -43,11 +48,14 @@ class Lecroy(tk.Frame):
         self.closeButton = tk.Button(self, text="close resource", command=self.closeDev, state=tk.DISABLED) 
         self.closeButton.pack(padx=10, anchor=tk.E)
 
-        self.getWFButton = tk.Button(self, text="plot WF", command=self.plotWF, state=tk.DISABLED)
+        self.getWFButton = tk.Button(self, text="capture and plot", command=self.plotWF, state=tk.DISABLED)
         self.getWFButton.pack(padx=10, anchor=tk.E)
 
-        self.getVppButton = tk.Button(self, text="get Vpp", command=self.getVpp)
-        self.getVppButton.pack(padx=10, anchor=tk.E)
+        self.autoScaleC1 = tk.Button(self, text="autoscale C1", command=lambda: self.manualVertical(ch="C1"), state=tk.DISABLED)
+        self.autoScaleC1.pack(padx=10, anchor=tk.E)
+
+        self.autoScaleC2 = tk.Button(self, text="autoscale C2", command=lambda: self.manualVertical(ch="C2"), state=tk.DISABLED)
+        self.autoScaleC2.pack(padx=10, anchor=tk.E)
 
         self.msgLabel = tk.Label(self, text="")
         self.msgLabel.pack(padx=10, anchor=tk.W)
@@ -68,16 +76,22 @@ class Lecroy(tk.Frame):
         if (self.isDevOpen() == False): #if not yet open
             ip = self.ipbox.get()
             try:
-                self.scope = self.rm.open_resource("VICP::"+ip+"::INSTR")
-                idn = self.scope.query("*IDN?")
-                print("idn="+idn)
-                self.scope.write("MSG 'running "+__file__+"'")
-                self.scope.write("COMM_HEADER OFF")
-
+                self.scope = self.rm.open_resource("VICP::"+ip+"::INSTR", timeout=5000)
             except Exception as e:
                 self.msg("could not connect on "+ip+" !")
                 print(e)
                 self.rm.close()
+                return
+
+            try:
+                idn = self.scope.query("*IDN?")
+                print("idn="+idn)
+                self.scope.write("MSG '"+__file__+"'")
+                self.scope.write("COMM_HEADER OFF")
+            except Exception as e:
+                self.msg("communication error!")
+                print(e)
+                return
                 
         if (self.isDevOpen() == True):
             dg = idn.split(',')
@@ -87,6 +101,8 @@ class Lecroy(tk.Frame):
                 self.openButton.configure(state=tk.DISABLED)
                 self.closeButton.configure(state=tk.NORMAL)
                 self.getWFButton.configure(state=tk.NORMAL)
+                self.autoScaleC1.configure(state=tk.NORMAL)
+                self.autoScaleC2.configure(state=tk.NORMAL)
                 self.ipbox.configure(state=tk.DISABLED)
                 self.inpBox.configure(state=tk.NORMAL)
                 self.inpBox.delete(0, tk.END)
@@ -117,10 +133,12 @@ class Lecroy(tk.Frame):
 
     def get_param_value(self,channel, parameter):
         s = self.scope.query(channel+":PAVA? "+parameter)
+        print("param value: "+s)
         # "MAX,3.211,OK\n"
-        resp = s.split(',')[2].rstrip('\n')
+        elem = s.split(',')
+        resp = elem[2].rstrip('\n')
         if (resp == 'OK' or resp == 'AV'): #for some parameters OK is reported, for others "Averaged over several periodes"
-            return self.getFloat(s)
+            return self.getFloat(elem[1])
         else:
             return resp
 
@@ -134,51 +152,41 @@ class Lecroy(tk.Frame):
             raise ValueError("could not read "+parameter)
         
 
-    def getVpp(self):
+    def getVpp(self, ch="C1"):
         self.scope.write("STOP")
-
-        c1_max = self.get_param_value("C1", "MAX")
-        c1_min = self.get_param_value("C1", "MIN")
-        c1_mean = self.get_param_value("C1", "MEAN")
-        c1_rms = self.get_param_value("C1", "RMS")
-        if (type(c1_max) == str or type(c1_min) == str or type(c1_mean) == str or type(c1_rms) == str):
-            print("OVERFLOW CH1! min="+str(c1_min)+" max="+str(c1_max))
-            self.msg("OVERFLOW!")            
+        c_max = self.get_param_value(ch, "MAX")
+        c_min = self.get_param_value(ch, "MIN")
+        if (type(c_max) == str or type(c_min) == str):
+            print("OVERFLOW "+ch+"! min="+str(c_min)+" max="+str(c_max))
+            self.msg("OVERFLOW!")
+            self.scope.write("TRIG_MODE AUTO")
             return np.NaN
         else:
-            c1_pp=c1_max-c1_min
-            print("Vpp(ch1)    = "+str(c1_pp))
-            print("V_mean(ch1) = "+str(c1_mean))
-            print("V_rms(ch1)  = "+str(c1_rms))
+            c_pp=c_max-c_min
+            print("Vpp("+ch+")    = "+str(c_pp))
+            self.scope.write("TRIG_MODE AUTO")
+            return c_pp
 
-        c2_max = self.get_param_value("C2", "MAX")
-        c2_min = self.get_param_value("C2", "MIN")
-        c2_mean = self.get_param_value("C2", "MEAN")
-        c2_rms = self.get_param_value("C2", "RMS")
-        if (type(c2_max) == str or type(c2_min) == str or type(c2_mean) == str or type(c2_rms) == str):
-            print("OVERFLOW CH2! min="+str(c2_min)+" max="+str(c2_max))
-            self.msg("OVERFLOW!")    
-            return np.NaN
-        else:
-            c2_pp=c2_max-c2_min
-            print("Vpp(ch1)    = "+str(c2_pp))
-            print("V_mean(ch1) = "+str(c2_mean))
-            print("V_rms(ch1)  = "+str(c2_rms))
-
+    def getDiffVpp(self):
+        c1_pp = self.getVpp("C1")
+        c2_pp = self.getVpp("C2")
         av = 20*np.log10(c2_pp / c1_pp)
         print(str(round(av,2))+"dB")
         self.msg(str(round(av,2))+"dB")
-
-
-        self.scope.write("TRIG_MODE AUTO")
         return av
-                
+        
+
+    def getSingleWF(self, ch="C1"):
+        arr = self.scope.query_binary_values(ch+":WF? DAT1", datatype='h', container=np.array, is_big_endian=True)
+        return arr
 
     def getWF(self):
         try:
             if (self.scope.query("C1:TRACE?").rstrip('\n') == 'ON' and self.scope.query("C2:TRACE?").rstrip('\n') == 'ON'):
-                self.ch2 = self.scope.query_binary_values("C2:WF? DAT1", datatype='h', container=np.array, is_big_endian=True)
-                self.ch1 = self.scope.query_binary_values("C1:WF? DAT1", datatype='h', container=np.array, is_big_endian=True)
+                self.scope.write("STOP")
+                self.ch1 = self.getSingleWF("C1")
+                self.ch2 = self.getSingleWF("C2")
+                self.scope.write("TRIG_MODE AUTO")
             else:
                 self.msg("Turn on CH1 and CH2!")
                 return False
@@ -201,61 +209,71 @@ class Lecroy(tk.Frame):
 
                 
             c_size = int(self.get_wavedesc_value("C1", "WAVE_ARRAY_COUNT"))
-            dt = self.get_wavedesc_value("C1", "HORIZ_INTERVAL")
-            t_offs = self.get_wavedesc_value("C1", "HORIZ_OFFSET")
-
-            self.t = np.linspace(0-t_offs, (c_size*dt)-t_offs, c_size)
+            self.dt = self.get_wavedesc_value("C1", "HORIZ_INTERVAL")
+            #t_offs = self.get_wavedesc_value("C1", "HORIZ_OFFSET")
+            #self.t = np.linspace(0-t_offs, (c_size*dt)-t_offs, c_size)
+            return True
             
         except Exception as e:
             print(e)
             self.closeDev()
+            
+        
 
-    def plotWF(self):
-        a = self.getVpp()
+    def calcSpectrum(self):        
+        M = len(self.ch1)
+        window = np.hanning(M)
+
+        fu = np.fft.rfft(self.ch1*window);
+        fy = np.fft.rfft(self.ch2*window);
+
+        fs=round(1/self.dt)
+        self.dt = 1/fs
+        faxis = np.fft.rfftfreq(M, self.dt)
+        
+        print("out of "+str(M)+" samples sampled at "+str(fs)+"Hz the Nyquist frq = "+str(round(max(faxis),3))+"Hz")
+        
+        # Find the frequency of the maximum magnitude in the FFT
+        idx_m = np.argmax(np.abs(fu))
+        fm = faxis[idx_m]
+        print("Maximum energy at fm="+str(round(fm,3))+"Hz")
+        print("ch1(fm) = "+str(round(20*np.log10(np.abs(fu[idx_m]))))+"dB, ch2(fm) = "+str(round(20*np.log10(np.abs(fy[idx_m]))))+"dB")
+        att = 20*np.log10(np.abs(fu[idx_m]) / np.abs(fy[idx_m]))
+        print("attenuation = "+str(round(att,2))+"dB")
+
+        return (faxis, fu, fy)
+
+
+
+    def plotWF(self, f_exc=None):
         self.getWF()
+        (faxis, fu, fy) = self.calcSpectrum()
 
         fig, axs = plt.subplots(nrows=2, ncols=2, squeeze=False, sharex='col', figsize=(10,8))
         fm=plt.get_current_fig_manager()
         fm.window.wm_geometry('1200x1000+0+0') #place the window on top left corner of screen
+        if (f_exc is not None):
+            fm.window.title("Analysis at "+str(f_exc)+"Hz") 
 
         plt.ion() #disp fig without blocking
-        axs[0][0].plot(self.t, self.ch1, color='gold')
-        #plt.pause(1) # Introduce a short delay for the plot to display
-
-        axs[1][0].plot(self.t, self.ch2, color='maroon')
-        #plt.pause(1) # Introduce a short delay for the plot to display
+        M = len(self.ch1)
+        t = np.linspace(0, M*self.dt, M)
+        axs[0][0].plot(t, self.ch1, color='gold')
+        axs[1][0].plot(t, self.ch2, color='maroon')
         
-
-        # Set the y-axis formatter to display values in ms, us, ns, or ps
-        formatter = ticker.EngFormatter()
-
-        # Apply the formatter to the y-axis
-        axs[1][0].xaxis.set_major_formatter(formatter)
+        formatter = ticker.EngFormatter()    # Set the y-axis formatter to display values in ms, us, ns, or ps
+        axs[1][0].xaxis.set_major_formatter(formatter) # Apply the formatter to the y-axis
 
         axs[0][0].set_title("Time-domain signals")
         axs[0][0].set(ylabel='input amplitude (V)')
         axs[0][0].grid()
         axs[1][0].set(xlabel='time (s)', ylabel='output amplitude (V)')
         axs[1][0].grid()
-        plt.xlim(min(self.t), max(self.t))
-        #plt.pause(1) # Introduce a short delay for the plot to display
+        plt.xlim(min(t), max(t))
 
 
-        window = np.hanning(len(self.t))
-        axs[0][0].plot(self.t, self.ch1*window)
-        axs[0][1].plot(self.t, self.ch2*window)
-        fu = np.fft.fft(self.ch1*window);
-        fy = np.fft.fft(self.ch2*window);
-        resp = np.divide(fy, fu);              # derived frequency response
-
-        dt=self.t[1]-self.t[0]
-        fs=1/dt
-        N=len(self.t)
-        
-        faxis = np.fft.fftfreq(N, dt)[:N // 2]
-        half = int(np.floor(N / 2))
-        axs[0][1].semilogx(faxis, 20*np.log10(np.abs(fu[:half]) / np.max(np.abs(fu)) ), '.')
-        axs[1][1].semilogx(faxis, 20*np.log10(np.abs(fy[:half]) / np.max(np.abs(fu)) ), '.')
+        axs[0][1].semilogx(faxis, 20*np.log10(np.abs(fu) / np.max(np.abs(fu)) ), '.')
+        axs[1][1].semilogx(faxis, 20*np.log10(np.abs(fy) / np.max(np.abs(fu)) ), '.')
 
         
 
@@ -265,35 +283,72 @@ class Lecroy(tk.Frame):
         axs[1][1].set(xlabel='frequency (Hz)', ylabel='FFT(output) dBV')        
         axs[1][1].grid()
         plt.xlim(faxis[1], max(faxis)/10)
-        
-
-        # Find the frequency of the maximum magnitude in the FFT
-        idx_m = np.argmax(np.abs(fu))
-        fm = faxis[idx_m]
-        print("Maximum energy at fm="+str(round(fm,3)))
-        print("ch1(fm) = "+str(round(20*np.log10(np.abs(fu[idx_m]))))+"dB, ch2(fm) = "+str(round(20*np.log10(np.abs(fy[idx_m]))))+"dB")
-        att = 20*np.log10(np.abs(fu[idx_m]) / np.abs(fy[idx_m]))
-        print("attenuation = "+str(round(att,2)))
-        
+              
 
         plt.show(block=False)  # Show plot in a non-blocking way
-        plt.pause(1) # Introduce a short delay for the plot to display
+        return (faxis, fu, fy)
 
-        #pdb.set_trace()
 
-    def get_max():
-        s = self.scope.query("C1:PAVA? MAX")
-        if (',OK\n' in s):
-            return float(s.split(',')[1])
-        elif (',OU\n' in s or ',OF\n' in s):
-            return np.PINF
+    def setTimeBase(self, tbase):
+        self.scope.write("TDIV "+str(tbase/10))
         
-    def get_min():
-        s = self.scope.query("C1:PAVA? MIN")
-        if (',OK\n' in s):
-            return float(s.split(',')[1])
-        elif (',OU\n' in s or ',OF\n' in s):
-            return np.NINF
+    def getTimeBase(self):
+        return float(self.scope.query("TDIV?"))*10
+    
+    def setVertical(self, ch="C1", vscreen=1):
+        self.scope.write(ch+":VDIV "+str(vscreen/8))
+
+    def getVertical(self, ch="C2"):
+        return float(self.scope.query(ch+":VDIV?"))*8
+        
+    def autoVertical(self, ch="C2"):
+        self.scope.write(ch+":AUTO_SETUP FIND")
+        
+    def manualVertical(self, ch=None):
+        #vpp=self.getVpp(ch) #this method asking for PAVA? MIN and MAX fails as long as screen is not full (insufficient data)
+        if (self.getWF()):
+            if (ch == "C1" or ch is None):
+                self.manualVerticalEach(np.ptp(self.ch1), "C1")
+            if (ch == "C2" or ch is None):
+                self.manualVerticalEach(np.ptp(self.ch2), "C2")
+        else:
+            self.msg("could not evaluate WF")
+
+    def manualVerticalEach(self, vpp, ch):        
+        screen_v = self.getVertical(ch)
+        self.msg("screen_v = "+str(screen_v)+", vpp="+str(vpp))
+        waittime = max(self.getTimeBase()*0.1,1)
+        m = vpp/screen_v
+
+        if (vpp > 0.9*screen_v):   # -> range down
+            self.msg("autoranging "+ch+" in progress... down (m="+str(round(m,3))+", 8*VDIV="+str(screen_v)+")")
+            self.setVertical(ch, screen_v*2)
+            self.clearSweeps()
+            # Using threading.Timer to implement non-blocking delay
+            self.tim = threading.Timer(waittime, lambda: self.manualVertical(ch=ch))
+            self.tim.start()
+        elif (vpp == 0):    #no signal in the screen
+            self.msg("autoranging "+ch+" in progress... set default")
+            self.setVertical(ch, 8.0) # -> 1V/DIV
+            self.clearSweeps()
+            self.tim = threading.Timer(waittime, lambda: self.manualVertical(ch=ch))
+            self.tim.start()
+        elif (vpp < 0.3 * screen_v): #small signal -> turn VDIV up
+            self.msg("autoranging "+ch+" in progress... up   (m="+str(round(m,3))+", 8*VDIV="+str(screen_v)+")")
+            if (m < 0.1):
+                self.setVertical(ch, screen_v*1.2*m)
+            else:
+                self.setVertical(ch, screen_v/2)
+            self.clearSweeps()
+            self.tim = threading.Timer(waittime, lambda: self.manualVertical(ch=ch))
+            self.tim.start()
+        else:
+            self.msg("autoranging "+ch+" finished            (m="+str(round(m,3))+", 8*VDIV="+str(screen_v)+")")
+            if self.tim is not None:
+                self.tim.cancel()
+        
+    def clearSweeps(self):
+        self.scope.write("CLEAR_SWEEPS")
     
 
     def onScpiEnter(self, *args):
@@ -335,6 +390,8 @@ class Lecroy(tk.Frame):
         
         
     def msg(self, mess):
+        current_time_str = datetime.now().strftime("%H:%M:%S.%f")
+        print(current_time_str + " \t"+mess)
         self.msgLabel.config(text=mess)
         if '?' in mess or '!' in mess:
             self.msgLabel.config(fg="red")
@@ -351,12 +408,16 @@ class Lecroy(tk.Frame):
     def closeDev(self):
         if (self.isDevOpen()):
             self.scope.close()
-        self.scope=0
+
+        self.rm.close()
+
         self.msg("resource closed")
         print("resource closed")
         self.openButton.configure(state=tk.NORMAL)
         self.closeButton.configure(state=tk.DISABLED)
         self.getWFButton.configure(state=tk.DISABLED)
+        self.autoScaleC1.configure(state=tk.DISABLED)
+        self.autoScaleC2.configure(state=tk.DISABLED)        
         self.ipbox.configure(state=tk.NORMAL)
         self.inpBox.configure(state=tk.DISABLED)
         
@@ -374,7 +435,7 @@ class App():
         self.lecroy = Lecroy(self.frame)
 
         self.window.protocol("WM_DELETE_WINDOW", self.close)
-        self.window.attributes('-alpha',0.8)
+        #self.window.attributes('-alpha',0.8)
         
         self.window.mainloop()        
 

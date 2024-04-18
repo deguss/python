@@ -1,151 +1,277 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import tkinter as tk
+from tkinter import filedialog
 import pdb
-import collections
-import math
-from tempfile import TemporaryFile
-outfile = TemporaryFile()
+import atexit
+import os
+from datetime import datetime
 
 from rigol import *
 from lecroy import *
 
 
-STEPS = 10
-START_F = 1
-STOP_F = 10
-frq=np.logspace(math.log10(START_F), math.log10(STOP_F), STEPS)
-waits = (1/frq) *5
-ch1=np.zeros(STEPS)
-ch2=np.zeros(STEPS)
+VOLT = 4 
+
 
 
 class Bode():
     def __init__(self):
 
-        self.filen = "1_150_100.npy"
-        
-        window = tk.Tk()
-        window.geometry("700x400")
-        window.title("Frequency response analyzer")
+        self.figBode = None
 
-        topFrame = tk.Frame(master=window)  # Added "container" Frame.
-        topFrame.pack(side=tk.TOP, fill=tk.X, expand=1, anchor=tk.N)
+        self.window = tk.Tk()
+        self.window.geometry("650x550")
+        self.window.title("Frequency response analyzer")
+
                 
-        frame1 = tk.Frame(master=topFrame, height=250, width=250, highlightbackground="gray", highlightthickness=1) # create the left frame
-        frame1.pack(side=tk.LEFT, padx=10, pady=10)
-        self.scope = Lecroy(frame1)   
+        self.frame1 = tk.Frame(master=self.window, highlightbackground="gray", highlightthickness=1) # create the left frame
+        self.frame1.grid(row=0, column=0, padx=10, pady=10, sticky='nsew') # Add sticky='nsew' to make the frame fill the space
+        self.scope = Lecroy(self.frame1)   
         
-        frame2 = tk.Frame(master=topFrame, height=250, width=250, highlightbackground="gray", highlightthickness=1)
-        frame2.pack(side=tk.LEFT, padx=10, pady=10)
-        self.rigol = Rigol(frame2)
+        self.frame2 = tk.Frame(master=self.window, highlightbackground="gray", highlightthickness=1)
+        self.frame2.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
+        self.rigol = Rigol(self.frame2)
 
-        botFrame = tk.Frame(master=window)
-        botFrame.pack(side=tk.BOTTOM, fill=tk.X, expand=1, anchor=tk.S)
+        self.bodeFrame = tk.Frame(master=self.window, highlightbackground="gray", highlightthickness=1)
+        self.bodeFrame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky='nsew')
+        self.bodeName = tk.Label(self.bodeFrame, text="Frequency analysis", font=("Arial", 16))
+        self.bodeName.grid(row=0, column=0, columnspan=4, sticky='nsew')
         
-        startButton = tk.Button(botFrame, text="start analysis", command=self.bode)
-        startButton.pack()
+        label = tk.Label(self.bodeFrame, text="start frequency (Hz)")
+        label.grid(row=1, column=0, sticky='E')
+        self.start_f = tk.Entry(self.bodeFrame, width=5)
+        self.start_f.insert(0, "1.0")
+        self.start_f.grid(row=1, column=1, sticky='W')
+        
+        label = tk.Label(self.bodeFrame, text="stop frequency (Hz)")
+        label.grid(row=2, column=0, sticky='E')
+        self.stop_f = tk.Entry(self.bodeFrame, width=5)
+        self.stop_f.insert(0, "100.0")
+        self.stop_f.grid(row=2, column=1, sticky='W')
 
-        loadFile = tk.Button(botFrame, text="display results", command=self.loadFile)
-        loadFile.pack()
+        label = tk.Label(self.bodeFrame, text="steps")
+        label.grid(row=3, column=0, sticky='E')
+        self.steps = tk.Entry(self.bodeFrame, width=3)
+        self.steps.insert(0, "3")
+        self.steps.grid(row=3, column=1, sticky='W')
+
+        #choicesvar = tk.StringVar(value=self.ports)
+        #self.lbox = tk.Listbox(self.bodeFrame, listvariable=choicesvar, width=35, height=6, activestyle='none', font=("Courier", 10))
+        #self.lbox.bind("<Double-1>", self.chooseDev) #register doubleclick action
+
+        
+        self.startButton = tk.Button(self.bodeFrame, text="start sweeping", command=self.initFrq)
+        self.startButton.grid(row=1, column=3, padx=20, pady=1, sticky='E')
+        self.cancelButton = tk.Button(self.bodeFrame, text="STOP", command=self.cancel)
+        self.cancelButton.grid(row=2, column=3, padx=20, pady=1, sticky='E')
+        self.loadFile = tk.Button(self.bodeFrame, text="load from file", command=self.loadFile)
+        self.loadFile.grid(row=3, column=3)
+
+        self.UIdisplayTimeFrq = tk.IntVar()
+        self.UIcheck1 = tk.Checkbutton(self.bodeFrame, text="display time and frequency domain signals for each frequency", variable=self.UIdisplayTimeFrq)
+        self.UIcheck1.grid(row=4, columnspan=3, sticky='W')
+        self.UIdisplayEachBode = tk.IntVar()
+        self.UIcheck2 = tk.Checkbutton(self.bodeFrame, text="display the bode-plot of each response on each excitation frequency", variable=self.UIdisplayEachBode)
+        self.UIcheck2.grid(row=5, columnspan=3, sticky='W')
+
+        self.msgLabel = tk.Label(self.bodeFrame, text="", width=50)
+        self.msgLabel.grid(row=6, columnspan=4)
 
         self.idx=0
-
-        window.mainloop()
-
-    def bode(self):
-        self.frq = frq
-        u=len(self.frq)
-        self.max=np.zeros(u)
-        self.rms=np.zeros(u)
-        self.mean=np.zeros(u)
-        self.std=np.zeros(u)
-        waits = self.waits
-        waits[waits<10]=10
-        self.waits=np.ceil(waits).astype(int) #round up to nearest integer seconds
-        totals=round( sum(self.waits) + len(self.frq)*1.2)
-        print("max(period) = "+str(round(max(self.waits)))+"s, in total "+str(totals)+"s")
-        print("in progress")
-
-        if (np.nanmax(self.scope.getPP())  and #some data is getting in
-            self.rigol.isDevOpen() ):  #and function generator is ready
-
-            self.nano.resetBuf(self.waits[0]*3)
-            self.rigol.configSine(frequency=self.frq[0], ampl=0.05, offs=0.025)
-                        
-            t1 = threading.Timer(self.waits[0], self.timerCallBack)
-            t1.start()
+        atexit.register(self.scope.closeDev)
+        self.window.mainloop()
+        
+    def msg(self, mess):
+        current_time_str = datetime.now().strftime("%H:%M:%S.%f")
+        print(current_time_str + " \t"+mess)
+        self.msgLabel.config(text=mess)
+        if '?' in mess or '!' in mess:
+            self.msgLabel.config(fg="red")
         else:
-            print("something not yet ready")
-            
+            self.msgLabel.config(fg="green")        
+        
 
-    def timerCallBack(self):
+    def initFrq(self):        
+        if (self.scope.isDevOpen() and self.rigol.isDevOpen()):            
+            steps = int(self.steps.get())
+            start_f = float(self.start_f.get())
+            stop_f = float(self.stop_f.get())
+            start_freq = int(np.log10(start_f))
+            stop_freq = int(np.log10(stop_f))
+            self.frq = np.logspace(start_freq, stop_freq, steps)
+            self.waits = np.maximum(((1/self.frq) * 100), 2) # Limit the wait times to at least 2 seconds for each element
+            self.waits = np.ceil(self.waits).astype(int) #round up to nearest integer seconds
+            self.mag = np.full(steps, np.NaN)
+            self.phase = np.full(steps, np.NaN)
+
+            for i in range(steps):
+                print(str(round(self.frq[i],3))+"Hz   \t"+str(self.waits[i])+"s")
+            totals=round( sum(self.waits) + len(self.frq)*3)
+            print("--------------------------------------")
+            print("in total appr. \t"+str(totals)+"s")
+
+            self.filen = "bode_"+str(start_f)+"-"+str(stop_f)+"Hz_"+str(VOLT)+"V"
+            
+            with open(self.filen+".txt", 'w') as file:
+                file.write("frequency (Hz)\tmagnitude (dB)\tphase (deg)\n")
+
+            self.msg("Total time appr. "+str(round(totals/60,2))+"min. Click start again if ok.")
+            self.startButton["command"] = self.initRigol                
+            
+        else:
+            self.msg("source/meter not yet ready!")
+
+    def initRigol(self):
+        self.rigol.configSine(frequency=self.frq[0], ampl=VOLT, offs=0)
+        self.msg("outputting "+str(VOLT)+"V sine at "+str(self.frq[0])+"Hz for "+str(self.waits[0])+"sec")
+        self.scope.setVertical("C1", VOLT*1.25)
+        self.adjustScopeHorizontal()
+        self.window.after(int(max(1/self.frq[0]*2 , 10) * 1000), self.adjustScopeVertical)
+
+    def adjustScopeHorizontal(self):        
+        duration = np.minimum(((1/self.frq[self.idx]) * 100), 100)
+        self.scope.setTimeBase(duration)
+        duration = self.scope.getTimeBase()
+        self.msg("scope: 10*TDIV = "+str(duration)+"s set")
+        self.waits[self.idx] = duration+2
+        
+
+    def adjustScopeVertical(self):
+        self.scope.manualVertical("C2")
+        self.msg("scope: C2:VDIV adjusting")
+        self.adjustScopeHorizontal()
+        self.window.after(int(self.waits[self.idx] * 1000), self.stepBode)
+        
+    def stepBode(self):
         i = self.idx
         if (i < len(self.frq)):        #until in range
-            data=self.nano.scope.getPP()                 #get data
-            self.max[i]=np.nanmax(data)            #save max value
-            self.rms[i]=np.sqrt(np.mean(pow(data,2)))   #save rms
-            self.mean[i]=np.mean(data)
-            self.std[i]=np.std(data)
+
+            if (self.UIdisplayTimeFrq.get() == 1):
+                (faxis, fu, fy) = self.scope.plotWF(self.frq[i])
+            else:
+                self.scope.getWF()
+                (faxis, fu, fy) = self.scope.calcSpectrum()                
+            
+            resp = np.divide(fy, fu);  # compute complex fourier transform out of the output's / input's
+            # linearly interpolate the magnitude and phase values at the desired frequency
+            self.mag[i] = np.interp(self.frq[i], faxis, 20*np.log10(np.abs(resp)))
+            self.phase[i] = np.interp(self.frq[i], faxis, np.angle(resp, deg=True))
+
+
+            with open(self.filen+".txt", 'a') as file:
+                file.write(str(round(self.frq[i],3))+"\t"+str(round(self.mag[i],1))+"\t"+str(round(self.phase[i],1))+"\n")
+
+            if (self.UIdisplayEachBode.get() == 1):
+                self.plotResp(faxis, resp, self.frq[i])
+            
+            self.plotBode()
 
             i+=1                      #step up to next
             if (i < len(self.frq)):   #if any
-                self.rigol.changeFrq(self.frq[i])     
-                self.scope.resetBuf(self.waits[i]*4)   
-                print(".", end="")
-                t1 = threading.Timer(self.waits[i], self.timerCallBack)
-                t1.start()
+                self.rigol.changeFrq(self.frq[i])
+                self.msg("outputting "+str(VOLT)+"V sine at "+str(self.frq[i])+"Hz")
+
+                self.window.after(int(max(1/self.frq[i]*1.2 , 6) * 1000), self.adjustScopeVertical)
             else: #finished
                 i=0
                 self.finishPlot()
-                #updatePlot()
         self.idx = i
 
+
+
+    def cancel(self):
+        print("cancelled")
+        self.startButton["command"] = self.initFrq
+        self.window.after_cancel(self.adjustScopeVertical)
+        self.window.after_cancel(self.stepBode)
+        self.msg("")
+        self.idx = 0
+        self.rigol.dg_send('OUTP OFF')
+
+        
     def finishPlot(self):
-        with open(self.filen, 'wb') as f:
+        self.rigol.dg_send('OUTP OFF')
+        self.msg("finished sweeping through all "+str(len(self.frq))+" frequencies")
+        with open(self.filen+".npy", 'wb') as f:
             np.save(f,self.frq)
-            np.save(f,self.max)
-            np.save(f,self.rms)
-            np.save(f,self.mean)
-            np.save(f,self.std)
+            np.save(f,self.mag)
+            np.save(f,self.phase)
             print(self.filen+" saved")
+        self.window.after(3000, self.confirmation)
+
+    def confirmation(self):
+        self.plotBode(finalize=True)
+        self.msg("data saved: "+str(self.filen)+"[.npy, .txt, .png]")
+            
 
     def loadFile(self):
-        with open(self.filen, 'rb') as f:
-            frq = np.load(f)
-            maxs = np.load(f)
-            rms = np.load(f)
-            mean = np.load(f)
-            stds = np.load(f)
-        plt.plot(frq,maxs, 'b.', label='peak')
-        plt.plot(frq,rms, 'g.', label='rms')
-        plt.plot(frq,mean, 'r.', label='mean')
-        plt.plot(frq,stds, 'c.', label='std') #blue green red cyan magenta yellow
-        plt.gca().legend()
-        plt.title('amplitude response')
-        plt.ylabel('amplitude')
-        plt.xscale('log')
-        plt.xlabel('log(frq)')
-        plt.grid(True)
-        plt.show()
-            
-        
-    def updatePlot(self):
-        1
+        cdir = os.getcwd()  # Get the current directory
+        file_path = filedialog.askopenfilename(initialdir=cdir, title="Select .npy file", filetypes=(("Numpy files", "*.npy"), ("All files", "*.*")))
+        if file_path:
+            print("opening:", file_path)
+            try:
+                with open(file_path, 'rb') as f:
+                    self.frq = np.load(f)
+                    self.mag = np.load(f)
+                    self.phase = np.load(f)
+                self.msg(file_path + " read.")
+                self.plotBode(self)
+            except Exception as e:
+                print(e)
+                print("could not load variables from file "+self.filen)
 
-    def plotBode(self):    
+    def show_plot(self):
+        # Your existing plotBode() method code here
+        # Replace plt.show(block=False) with the following:
+        self.plotBode(faxis, resp)
+
+    def plotResp(self, faxis, resp, f_exc):
+        plt.ion() #turn interactive plotting off            
+        fig, ax = plt.subplots(nrows=2, ncols=1, squeeze=False, sharex='col', figsize=(10,8))
+        fm=plt.get_current_fig_manager()
+        fm.window.wm_geometry('1200x1000+0+0') #place the window on top left corner of screen
+        plt.ion()
+        ax[0][0].set_title("Bode-plot of CH2/CH1")
+        ax[0][0].semilogx(faxis, 20*np.log10(np.abs(resp)), label='')
+        ax[0][0].axvline(x=f_exc, color='r', linestyle=':', label="excitation frequency = "+str(f_exc)+"Hz")         # Add a vertical line at f_exc
+        ax[0][0].legend()
+        ax[0][0].set(ylabel='Magnitude (dB)')
+        ax[0][0].grid()
+        ax[1][0].semilogx(faxis, np.angle(resp)*180/np.pi)
+        ax[0][0].axvline(x=f_exc, color='r', linestyle=':')
+        ax[1][0].set(ylabel='Phase (deg)', xlabel='log10(frequency) (Hz)')
+        ax[1][0].grid()
+        plt.show(block=False)
+
+    def plotBode(self, finalize=None):    
         plt.ion() #turn interactive plotting off
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        plt.yscale('log')
-        plt.grid(True)
-        line1, = ax.plot(0.1, 1, '.r')
+        if (self.figBode is None):
+            self.figBode, self.axBode = plt.subplots(nrows=2, ncols=1, squeeze=False, sharex='col', figsize=(10,8))
+        (fig, ax) = (self.figBode, self.axBode)
+        fm=plt.get_current_fig_manager()
+        fm.window.wm_geometry('1200x1000+0+0') #place the window on top left corner of screen
+        plt.ion()
+        ax[0][0].clear()
+        ax[0][0].set_title("Bode-diagram of Y/U")
+        ax[0][0].semilogx(self.frq, self.mag, 'r*-')
+        ax[0][0].set(ylabel='Magnitude (dB)')
+        ax[0][0].grid()
 
+        ax[1][0].clear()
+        ax[1][0].semilogx(self.frq, self.phase, 'r*-')
+        ax[1][0].set(ylabel='Phase (deg)', xlabel='log10(frequency) (Hz)')
+        ax[1][0].grid()
+        plt.show(block=False)
+
+        if (finalize is True): #if finished
+            plt.pause(1) # Introduce a short delay for the plot to display
+            fig.savefig(self.filen+".png")
+        
     
 
 def main():
     b = Bode()
-    
 
 
 if __name__ == '__main__':

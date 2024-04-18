@@ -30,17 +30,19 @@ class Rigol(tk.Frame):
         boxname = tk.Label(self, text="Function Generator", font=("Arial", 16)) #title
         boxname.pack(padx=10, pady=10)
 
+
+        choicesvar = tk.StringVar(value=self.ports)
+        self.lbox = tk.Listbox(self, listvariable=choicesvar, width=35, height=6, activestyle='none', font=("Courier", 10))
+        self.lbox.bind("<Double-1>", self.chooseDev) #register doubleclick action
+        self.lbox.pack(padx=10, pady=10)
+
+
         self.openButton = tk.Button(self, text="open resource", command=self.chooseDev)
         self.openButton.pack(padx=10, anchor=tk.E)
 
         self.closeButton = tk.Button(self, text="close resource", command=self.closeDev, state=tk.DISABLED) #combine_funcs())
         self.closeButton.pack(padx=10, anchor=tk.E)
-
-        
-        choicesvar = tk.StringVar(value=self.ports)
-        self.lbox = tk.Listbox(self, listvariable=choicesvar, width=35, height=6, activestyle='none', font=("Courier", 10))
-        self.lbox.bind("<Double-1>", self.chooseDev) #register doubleclick action
-        self.lbox.pack(padx=10, pady=10)
+       
 
         self.msgLabel = tk.Label(self, text="")
         self.msgLabel.pack(padx=10, anchor=tk.W)
@@ -114,13 +116,15 @@ class Rigol(tk.Frame):
         self.dg_send('APPL SIN')
         self.dg_send('FREQ ' + str(frequency))  # Set the frequency
         self.dg_send('VOLT:UNIT VPP')  # Set VPP mode
-        self.dg_send('VOLT' + str(ampl))  # Set Vpp
+        self.dg_send('VOLT ' + str(ampl))  # Set Vpp
         self.dg_send('VOLT:OFFS' + str(offs))
         self.dg_send('OUTP ON')  # Turn CH1 on
 
     def changeFrq(self, frequency):
         self.dg_send('FREQ ' + str(frequency))           
-  
+
+    def changeAmpl(self, ampl):
+        self.dg_send('VOLT ' + str(ampl))   
 
 
         
