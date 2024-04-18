@@ -41,7 +41,7 @@ class Bode():
         label = tk.Label(self.bodeFrame, text="start frequency (Hz)")
         label.grid(row=1, column=0, sticky='E')
         self.start_f = tk.Entry(self.bodeFrame, width=5)
-        self.start_f.insert(0, "1.0")
+        self.start_f.insert(0, "10")
         self.start_f.grid(row=1, column=1, sticky='W')
         
         label = tk.Label(self.bodeFrame, text="stop frequency (Hz)")
@@ -53,7 +53,7 @@ class Bode():
         label = tk.Label(self.bodeFrame, text="steps")
         label.grid(row=3, column=0, sticky='E')
         self.steps = tk.Entry(self.bodeFrame, width=3)
-        self.steps.insert(0, "3")
+        self.steps.insert(0, "10")
         self.steps.grid(row=3, column=1, sticky='W')
 
         #choicesvar = tk.StringVar(value=self.ports)
@@ -117,17 +117,18 @@ class Bode():
                 file.write("frequency (Hz)\tmagnitude (dB)\tphase (deg)\n")
 
             self.msg("Total time appr. "+str(round(totals/60,2))+"min. Click start again if ok.")
-            self.startButton["command"] = self.initRigol                
+
+            self.rigol.configSine(frequency=self.frq[0], ampl=VOLT, offs=0)
+            self.msg("outputting "+str(VOLT)+"V sine at "+str(self.frq[0])+"Hz for "+str(self.waits[0])+"sec")
+            self.scope.setVertical("C1", VOLT*1.25)
+            self.adjustScopeHorizontal()
+        
+            self.startButton["command"] = self.stepBode
             
         else:
             self.msg("source/meter not yet ready!")
 
-    def initRigol(self):
-        self.rigol.configSine(frequency=self.frq[0], ampl=VOLT, offs=0)
-        self.msg("outputting "+str(VOLT)+"V sine at "+str(self.frq[0])+"Hz for "+str(self.waits[0])+"sec")
-        self.scope.setVertical("C1", VOLT*1.25)
-        self.adjustScopeHorizontal()
-        self.window.after(int(max(1/self.frq[0]*2 , 10) * 1000), self.adjustScopeVertical)
+        
 
     def adjustScopeHorizontal(self):        
         duration = np.minimum(((1/self.frq[self.idx]) * 100), 100)
@@ -137,53 +138,47 @@ class Bode():
         self.waits[self.idx] = duration+2
         
 
-    def adjustScopeVertical(self):
-        self.scope.manualVertical("C2")
-        self.msg("scope: C2:VDIV adjusting")
-        self.adjustScopeHorizontal()
-        self.window.after(int(self.waits[self.idx] * 1000), self.stepBode)
-        
+
     def stepBode(self):
-        i = self.idx
-        if (i < len(self.frq)):        #until in range
+        if (self.idx < len(self.frq)):        #until in range
 
             if (self.UIdisplayTimeFrq.get() == 1):
-                (faxis, fu, fy) = self.scope.plotWF(self.frq[i])
+                (faxis, fu, fy) = self.scope.plotWF(self.frq[self.idx])
             else:
                 self.scope.getWF()
                 (faxis, fu, fy) = self.scope.calcSpectrum()                
             
             resp = np.divide(fy, fu);  # compute complex fourier transform out of the output's / input's
             # linearly interpolate the magnitude and phase values at the desired frequency
-            self.mag[i] = np.interp(self.frq[i], faxis, 20*np.log10(np.abs(resp)))
-            self.phase[i] = np.interp(self.frq[i], faxis, np.angle(resp, deg=True))
+            self.mag[self.idx] = np.interp(self.frq[self.idx], faxis, 20*np.log10(np.abs(resp)))
+            self.phase[self.idx] = np.interp(self.frq[self.idx], faxis, np.angle(resp, deg=True))
 
 
             with open(self.filen+".txt", 'a') as file:
-                file.write(str(round(self.frq[i],3))+"\t"+str(round(self.mag[i],1))+"\t"+str(round(self.phase[i],1))+"\n")
+                file.write(str(round(self.frq[self.idx],3))+"\t"+str(round(self.mag[self.idx],1))+"\t"+str(round(self.phase[self.idx],1))+"\n")
 
             if (self.UIdisplayEachBode.get() == 1):
-                self.plotResp(faxis, resp, self.frq[i])
+                self.plotResp(faxis, resp, self.frq[self.idx])
             
             self.plotBode()
 
-            i+=1                      #step up to next
-            if (i < len(self.frq)):   #if any
-                self.rigol.changeFrq(self.frq[i])
-                self.msg("outputting "+str(VOLT)+"V sine at "+str(self.frq[i])+"Hz")
+            self.idx+=1
+            if (self.idx < len(self.frq)):   #if any
+                self.rigol.changeFrq(self.frq[self.idx])
+                self.msg("outputting "+str(VOLT)+"V sine at "+str(self.frq[self.idx])+"Hz")
+                self.scope.manualVertical("C2")
+                self.adjustScopeHorizontal()
 
-                self.window.after(int(max(1/self.frq[i]*1.2 , 6) * 1000), self.adjustScopeVertical)
+                self.window.after(int(max(1/self.frq[self.idx]*1.2 , 10) * 1000), self.stepBode)
             else: #finished
-                i=0
+                self.idx=0
                 self.finishPlot()
-        self.idx = i
 
 
 
     def cancel(self):
         print("cancelled")
         self.startButton["command"] = self.initFrq
-        self.window.after_cancel(self.adjustScopeVertical)
         self.window.after_cancel(self.stepBode)
         self.msg("")
         self.idx = 0
@@ -193,6 +188,7 @@ class Bode():
     def finishPlot(self):
         self.rigol.dg_send('OUTP OFF')
         self.msg("finished sweeping through all "+str(len(self.frq))+" frequencies")
+        self.startButton["command"] = self.initFrq
         with open(self.filen+".npy", 'wb') as f:
             np.save(f,self.frq)
             np.save(f,self.mag)
@@ -220,11 +216,6 @@ class Bode():
             except Exception as e:
                 print(e)
                 print("could not load variables from file "+self.filen)
-
-    def show_plot(self):
-        # Your existing plotBode() method code here
-        # Replace plt.show(block=False) with the following:
-        self.plotBode(faxis, resp)
 
     def plotResp(self, faxis, resp, f_exc):
         plt.ion() #turn interactive plotting off            

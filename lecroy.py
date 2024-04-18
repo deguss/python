@@ -305,47 +305,38 @@ class Lecroy(tk.Frame):
         self.scope.write(ch+":AUTO_SETUP FIND")
         
     def manualVertical(self, ch=None):
-        #vpp=self.getVpp(ch) #this method asking for PAVA? MIN and MAX fails as long as screen is not full (insufficient data)
-        if (self.getWF()):
-            if (ch == "C1" or ch is None):
-                self.manualVerticalEach(np.ptp(self.ch1), "C1")
-            if (ch == "C2" or ch is None):
-                self.manualVerticalEach(np.ptp(self.ch2), "C2")
-        else:
-            self.msg("could not evaluate WF")
-
+        if (len(self.ch1) == 0):
+            self.getWF()
+        if (ch == "C1" or ch is None):
+            c1_pp = np.ptp(self.ch1)
+            self.manualVerticalEach(c1_pp, "C1")
+        if (ch == "C2" or ch is None):
+            c2_pp = np.ptp(self.ch2)
+            self.manualVerticalEach(c2_pp, "C2")
+        
     def manualVerticalEach(self, vpp, ch):        
         screen_v = self.getVertical(ch)
-        self.msg("screen_v = "+str(screen_v)+", vpp="+str(vpp))
         waittime = max(self.getTimeBase()*0.1,1)
         m = vpp/screen_v
 
-        if (vpp > 0.9*screen_v):   # -> range down
-            self.msg("autoranging "+ch+" in progress... down (m="+str(round(m,3))+", 8*VDIV="+str(screen_v)+")")
+        if (m > 0.99):                 # -> fast range down
+            self.msg("ranging down "+ch+" ("+str(round(m,3))+")")
+            self.setVertical(ch, screen_v*8)
+        elif (m > 0.9 and m < 0.99):   # -> range down
+            self.msg("ranging down "+ch+" ("+str(round(m,3))+")")
             self.setVertical(ch, screen_v*2)
-            self.clearSweeps()
-            # Using threading.Timer to implement non-blocking delay
-            self.tim = threading.Timer(waittime, lambda: self.manualVertical(ch=ch))
-            self.tim.start()
-        elif (vpp == 0):    #no signal in the screen
-            self.msg("autoranging "+ch+" in progress... set default")
-            self.setVertical(ch, 8.0) # -> 1V/DIV
-            self.clearSweeps()
-            self.tim = threading.Timer(waittime, lambda: self.manualVertical(ch=ch))
-            self.tim.start()
-        elif (vpp < 0.3 * screen_v): #small signal -> turn VDIV up
-            self.msg("autoranging "+ch+" in progress... up   (m="+str(round(m,3))+", 8*VDIV="+str(screen_v)+")")
-            if (m < 0.1):
-                self.setVertical(ch, screen_v*1.2*m)
-            else:
-                self.setVertical(ch, screen_v/2)
-            self.clearSweeps()
-            self.tim = threading.Timer(waittime, lambda: self.manualVertical(ch=ch))
-            self.tim.start()
+        elif (vpp == 0):               #no signal in the screen
+            self.msg("ranging in progress "+ch+"... set default")
+            self.setVertical(ch, 8.0)  # -> 1V/DIV
+        elif (m < 0.1):                # very small signal -> turn VDIV up
+            self.msg("ranging up "+ch+" ("+str(round(m,3))+")")
+            self.setVertical(ch, screen_v*1.2*m)
+        elif (m < 0.3):
+            self.msg("ranging up "+ch+" ("+str(round(m,3))+")")
+            self.setVertical(ch, screen_v/2)
         else:
-            self.msg("autoranging "+ch+" finished            (m="+str(round(m,3))+", 8*VDIV="+str(screen_v)+")")
-            if self.tim is not None:
-                self.tim.cancel()
+            self.msg("autoranging "+ch+" done (m="+str(round(m,3))+", 8*VDIV="+str(screen_v)+")")
+
         
     def clearSweeps(self):
         self.scope.write("CLEAR_SWEEPS")
