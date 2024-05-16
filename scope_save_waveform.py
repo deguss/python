@@ -66,6 +66,7 @@ except Exception as e:
 try:
     #determine first, which trace is turned on.
     traces=0
+    scope.write("STOP")
     if (scope.query("C4:TRACE?").rstrip('\n') == 'ON'):    
         c4 = scope.query_binary_values("C4:WF? DAT1", datatype='h', container=np.array, is_big_endian=True)
         cn="C4"
@@ -226,7 +227,8 @@ try:
         print("c4_frq: "+str(c4_frq))
         print("c4_period: "+str(c4_period))
         print("c4_sdev: "+str(c4_sdev))
-        print("")        
+        print("")
+    scope.write("TRIG_MODE AUTO")
     
 except Exception as e:
     print(e)
@@ -280,6 +282,6 @@ elif (fn != 'c'):
     axs[0][0].set_title(fn +"  "+ overflow +" "+ bwl +" @"+ time_string)
     fig.savefig(fn)
 
-
+pdb.set_trace()
 plt.pause(1) # Resume the program to exit the plot window
     

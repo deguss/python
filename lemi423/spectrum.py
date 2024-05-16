@@ -1,103 +1,116 @@
 import matplotlib.pyplot as plt
+from pylab import *
 import time
 import numpy as np
-import csv
+import scipy.stats as sps
+import matplotlib.pyplot as plt
 import os
 import pdb
 
 labels=["Bx","By","Bz","Ex","Ey"]
 
 #returns the next power of 2
-def next_pow_2(x):
+def next_pow_2(f):
+    x=int(f)
     return 1<<(x-1).bit_length()
 
-def plotTime(T, D):
-
-    #data is a matrix with as many rows as subplots needed
-    n=D.shape[0]
-    fig, ax = plt.subplots(n, figsize=(12,7), sharex=True)
-    ax[0].set_title("recording of the magnetic field")
-
-    startdate=time.strftime("%H:%M:%S",time.gmtime(T[0]))
-    enddate=time.strftime("%H:%M:%S",time.gmtime(T[-1]))
-    
-    for i in range(0,n):
-        ax[i].plot(T, D[i],  linewidth=0.2)
-        #ax[i].scatter(T[::11], D[i][::11], s=0.2)
-        #ax[i].scatter(T, D[i], s=0.2)
-        ax[i].grid(True)
-        ax[i].set_ylabel(labels[i])
-        ax[i].set_ylim([-5000,5000])
-        ax[i].set_xlim([T[0],T[-1]])
-     
-    ax[-1].set_xlabel('time (UTC)')
-    xt=ax[-1].get_xticks()
-    xtt=[]
-    for x in xt:
-        xtt.append(time.strftime("%H:%M:%S",time.gmtime(x)))
-    ax[-1].set_xticks(xt)
-    ax[-1].set_xticklabels(xtt)
-
-    
-
-    plt.tight_layout()    
-    plt.pause(0.001)
-    plt.show()
-    
-    
-
-def plotSpec(D, start, end, smplr, folder):
-
-    #data is a matrix with as many rows as subplots needed
-    n=D.shape[0]
-    fig, ax = plt.subplots(n, figsize=(12,7), sharex=True)
-    ax[0].set_title("Magnetic field spectrum")
-
-    startdate=time.strftime("%Y%m%d_%H%M%S",time.gmtime(start))
-    
-    span=end-start
-    nfft=next_pow_2(smplr*10)
-    print(f'span = {span}s, Fs={smplr}Hz, nfft={nfft}')
-    #f = np.fft.rfftfreq(nfft, 1.0/smplr) # prepare the frequency array
-
-
-
-    for i in range(0,n):
-        Pxx, freqs, bins, im = ax[i].specgram(D[i], NFFT=nfft, Fs=smplr, noverlap=nfft/2)
-        ax[i].set_ylabel(labels[i])
-        #ax[i].set_xlim([start,end])
-     
-    ax[-1].set_xlabel('time (UTC)')
-    xt=ax[-1].get_xticks()
-    xtt=[]
-    for x in xt:
-        xtt.append(time.strftime("%H:%M:%S",time.gmtime(x+start)))
-    ax[-1].set_xticks(xt)
-    ax[-1].set_xticklabels(xtt)
-
-    
+def plotTimeSpectroHisto(D, start, disp, smplr, folder):
     try:
-        filename=os.path.join(folder,"sp"+startdate+".png")
-        fig.savefig(filename, dpi=100)
-    except:
-        print("save error!")
+        gs_kw = dict(width_ratios=[3, 1])
+        fig, ax = plt.subplots(ncols=2, nrows=2, sharey='row', figsize=(16,8), constrained_layout=True, gridspec_kw=gs_kw)
+        
+        startdate=time.strftime("%Y%m%d_%H%M",time.gmtime(start))
+        day=time.strftime("%Y/%m/%d",time.gmtime(start))
+        M = len(D)
+        span = M/smplr
+        T=np.linspace(0, span, M)
+        xhours=span/3600
+
+        #------------ timeseries plot -----------------
+        ax[0][0].set_title(f'40m wire current on {day} {round(xhours,2)} hour plots')
+        ax[0][0].plot(T, D,  linewidth=0.4)
+        ax[0][0].set_ylabel("Amplitude pA")
+        ax[0][0].set_xlim([T[0],T[-1]])
+        ax[0][0].grid()
+
+        if (True):
+            xt=ax[0][0].get_xticks()
+            xtt=[]
+            for x in xt:
+                xtt.append(time.strftime("%H:%M:%S",time.gmtime(x+start)))
+            ax[0][0].set_xticks(xt)
+            ax[0][0].set_xticklabels(xtt)
+        ax[0][0].autoscale(enable=True, axis='x', tight=True)
+
+        #------------ spectrogram plot -----------------
+        nfft=next_pow_2(M/200)
+        s_span = time.strftime("%H:%M:%S",time.gmtime(span))
+        Pxx, freqs, bins, im = ax[1][0].specgram(D, NFFT=nfft, Fs=smplr, mode='psd',  window=mlab.window_hanning, noverlap=nfft//2)
+        ax[1][0].set_ylabel("Frequency in Hz")
+        ax[1][0].set_title(f'Spectrogram [span = {s_span}, Fs={smplr}Hz, nfft={nfft}, overlap={nfft//2}, window=\"hanning\"]')
+
+        if (True):
+            ax[1][0].set_xlabel('time (UTC)')    
+            xt=ax[1][0].get_xticks()
+            xtt=[]
+            for x in xt:
+                xtt.append(time.strftime("%H:%M:%S",time.gmtime(x+start)))
+            ax[1][0].set_xticks(xt)
+            ax[1][0].set_xticklabels(xtt)
+        ax[1][0].autoscale(enable=True, axis='x', tight=True)
+
+        #------------ histogram of timeseries -----------
+        ax[0][1].hist(D, bins=20, orientation="horizontal", density=True, alpha=0.4, edgecolor='none')
+        # get X limits and fix them
+        mn, mx = ax[0][1].get_ylim()
+        y = np.linspace(mn, mx, 301)
+        # estimate Kernel Density and plot
+        kde = sps.gaussian_kde(D)
+        ax[0][1].plot(kde.pdf(y), y, label='KDE')
+        ax[0][1].set_title("Probability Density Function")
+        ax[0][1].grid()
+        
+
+        #------------ accumulated spectrum -----------
+        window = np.hanning(M)
+        fu = np.fft.rfft(D*window);
+        faxis = np.fft.rfftfreq(M, 1/smplr)
+        ax[1][1].semilogx(np.abs(fu), faxis, color='r')
+        #ax[1][1].set_xlim([10,1000])
+        ax[1][1].set_title("Power Spectral Density")
+        ax[1][1].grid()
+
+      
+
+    except Exception as e:
+        print(e)
+        pdb.set_trace()
+        
+
+    if (disp):
+        plt.pause(0.001)
+        plt.show()
     else:
-        print(filename,"saved!")
-    
-    
-    #plt.tight_layout()    
-    #plt.pause(0.001)
-    #plt.show()
+        try:
+            filename=os.path.join(folder,str(round(xhours))+"h_"+startdate+".png")
+            fig.savefig(filename, dpi=100)
+            plt.close()
+        except:
+            print("save error!")
+        else:
+            print(filename,"saved!")
+            
+
+
+
     
 
 if __name__ == "__main__":
-    l=100000
-    t=np.arange(1,l)
-    T = np.arange(l)
-    D = np.zeros((2,l))
-    D[0] = 3000*np.sin(40*T)
-    D[1] = 1000*np.sin(12*T)
+    length=600
+    T = np.linspace(0,600,length*250)
+    D = 3000*np.sin(2*np.pi*8*T) + 200*np.sin(2*np.pi*50*np.clip(T-300,0,300))
     #plotTime(T,D)
-    plotSpec(D,0,1,500,"E:\\")
+    #plotSpec(D,0,1,500,"E:\\")
+    plotCombined(D,0,length,250,"E:\\")
     
 
