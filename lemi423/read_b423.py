@@ -89,8 +89,9 @@ if __name__ == "__main__":
 
     answ_1 = askyesno("Display or background processing", "Do you want the plots to be displayed?")
                       
-    buf_size=smplr*60*60*24  #buffer length 12h
+    buf_size=smplr*60*60*1  #buffer length x h
     D = np.zeros(buf_size)
+    W = np.zeros(buf_size)
 
     i = 0       #file counter
     buf = 0     #buffer counter
@@ -130,8 +131,9 @@ if __name__ == "__main__":
                         startdate = data_tuple[0]+data_tuple[1]/smplr
                         print("\tstart: "+time.strftime("%H:%M:%S", time.gmtime(startdate)))
                            
-                    D[elem]=1.16026754516719e-06 * data_tuple[2] - 19.883561650656972 #mV
+                    D[elem] = 1.16026754516719e-06 * data_tuple[2] - 19.883561650656972 #mV
                     D[elem] = D[elem]*98.37  #scale to pA
+                    W[elem] = data_tuple[3]
                             
                     elem=elem+1
                     if (elem >= fsize/30):  #EOF 
@@ -143,12 +145,18 @@ if __name__ == "__main__":
                     print("\tend:   "+time.strftime("%H:%M:%S", time.gmtime(enddate)))
                     
                     D=np.trim_zeros(D, 'b')                  #remove trailing 0 elements
+                    W=np.trim_zeros(W, 'b')
 
                     decimator = 50 #resample -> fnyquist = 1.25Hz
                     res = np.interp(np.arange(0, len(D), decimator), np.arange(0, len(D)), D)
+
+                    #convert aenometer impulses to wind speed
+                    window = np.hanning(len(W))
+                    W=W-np.mean(W)
+                    fW = np.fft.rfft(W*window)
                     
                     #plotCombined(res, start=startdate, disp=answ_1, smplr=smplr/decimator, folder=subfolder)
-                    plotTimeSpectroHisto(res, start=startdate, disp=answ_1, smplr=smplr/decimator, folder=subfolder)
+                    plotTimeSpectroHisto(res, W, start=startdate, disp=answ_1, smplr=smplr/decimator, folder=subfolder)
 
                     D = np.zeros(buf_size)
                     elem = 0

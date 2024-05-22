@@ -97,6 +97,7 @@ class ADS1256(tk.Frame):
             self.lbox.configure(state=tk.DISABLED)
             
             self.ser.reset_input_buffer()
+            self.resetBuf()
             
             self.timerCallBack()
             return True
@@ -130,16 +131,15 @@ class ADS1256(tk.Frame):
                         # Read the variable-length part of the struct (adc_data array)
                         adc_data_bytes = b''  # Initialize an empty byte buffer to accumulate data
                         bytes_needed = self.length * struct.calcsize('i')  # Calculate the total bytes needed for unpacking
-                        print(str(bytes_needed)+"bytes expecting")
                         
                         # Loop to read data in parts until enough data is accumulated
                         while len(adc_data_bytes) < bytes_needed:
                             remaining_bytes = bytes_needed - len(adc_data_bytes)
                             adc_data_bytes += self.ser.read(remaining_bytes)
-                            print(str(remaining_bytes)+"read")
                             rmnd=self.ser.inWaiting()
-                            print(str(rmnd)+"remained in Rxbuf")
-                            print(self.ser.read(rmnd))
+                            if (rmnd > 0):
+                                print(f'{bytes_needed} bytes expecting, {remaining_bytes} read, {rmnd} remained in Rxbuf')
+                            #print(self.ser.read(rmnd))
 
                         if len(adc_data_bytes) == bytes_needed:
                             adc_data = struct.unpack('<{}i'.format(self.length), adc_data_bytes)
@@ -270,14 +270,18 @@ class App():
         
         self.fig.canvas.draw()  # draw the initial plot
         self.fig.canvas.flush_events()
-        self.timer = self.fig.canvas.new_timer(interval=UPDATE_RATE) # set up a timer to update the plot
+        self.timer = self.fig.canvas.new_timer(interval=UPDATE_RATE) # set up a timer to update the plot time in ms
         self.timer.add_callback(self.updatePlot)
         self.timer.start()
             
             
     def updatePlot(self):
-        text = self.boxes[2].cget("text")  # Get the text from box[1]
-        sps = int(text.split("Hz")[0])
+        try:
+            text = self.boxes[2].cget("text")  # Get the text from box[1]
+            sps = int(text.split("Hz")[0])
+        except (ValueError):
+            self.timer.stop()
+            return
         
         d=self.ads.getBuf()        
         self.line1.set_xdata(np.linspace(0,1/sps*np.size(d),np.size(d)))
@@ -286,6 +290,7 @@ class App():
         self.ax.autoscale_view()        
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
+        print('|', end="")
         
     def stop(self):
         self.timer.stop()
