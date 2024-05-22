@@ -5,13 +5,15 @@ import collections
 import math
 import datetime as dt
 import pdb
-
 import time, threading
+
+
 CALLBACK_SECONDS = 1
 BUFFERSIZE=10000
 from serial.tools.list_ports import comports
 import serial
 import struct
+
 
 # Define the fixed-size part of the struct format
 FIXED_FORMAT_STR = '<HHbb'
@@ -26,12 +28,11 @@ SIZE_FIXED_FORMAT = struct.calcsize(FIXED_FORMAT_STR)
 
 
 #----------------------------------------------------------
-class ADS1256(tk.Frame):
+class USBserial(tk.Frame):
 #----------------------------------------------------------    
-    def __init__(self, parent, boxes):
-        tk.Frame.__init__(self, parent)   
-        self.parent = parent
-        self.boxes = boxes
+    def __init__(self, parent):
+        super().__init__()
+        tk.Frame.__init__(self, parent, height=400, width=600, highlightbackground="gray", highlightthickness=1)
         
         self.timeout=0
         self.tim=0
@@ -50,25 +51,44 @@ class ADS1256(tk.Frame):
         self.initUI()
 
     def initUI(self):
-        # create GUI inside parent frame
-        self.pack(fill=tk.BOTH, expand=1)
         
-        boxname = tk.Label(self, text="ADS1256", font=("Arial", 16)) #title
-        boxname.pack(padx=10, pady=10)
+        self.title = tk.Label(self, text="ADS1256", font=("Arial", 16)) #title
+        self.title.grid(row=1, column=0, columnspan=5, sticky='nsew') # Add sticky='nsew' to make the frame fill the space
+
+        self.choicesvar = tk.StringVar(value=self.ports)
+        self.lbox = tk.Listbox(self, listvariable=self.choicesvar, width=35, height=6, activestyle='none', font=("Courier", 10))
+        self.lbox.bind("<Double-1>", self.testSerPort) #register doubleclick action
+        self.lbox.grid(row=2, rowspan=4, column=0, columnspan=4, sticky='W', padx=10, pady=10)
 
         self.openButton = tk.Button(self, text="open port", command=self.testSerPort)
-        self.openButton.pack(padx=10, anchor=tk.E)
-
-        self.closeButton = tk.Button(self, text="close port", command=self.serClose, state=tk.DISABLED) #combine_funcs())
-        self.closeButton.pack(padx=10, anchor=tk.E)
+        self.openButton.grid(row=2, column=4, sticky='E', padx=10, pady=5)
         
-        choicesvar = tk.StringVar(value=self.ports)
-        self.lbox = tk.Listbox(self, listvariable=choicesvar, width=35, height=6, activestyle='none', font=("Courier", 10))
-        self.lbox.bind("<Double-1>", self.testSerPort) #register doubleclick action
-        self.lbox.pack(padx=10, pady=10)
+        self.closeButton = tk.Button(self, text="close port", command=self.serClose, state=tk.DISABLED)
+        self.closeButton.grid(row=3, column=4, sticky='E', padx=10, pady=5)
+
+        self.label1 = tk.Label(self, text="input: ")
+        self.label1.grid(row=6, column=0, sticky='E')
+        self.l1 = tk.Label(self, text="    ", font=("Arial", 16))
+        self.l1.grid(row=6, column=1, sticky='W')
+
+        self.label2 = tk.Label(self, text="ref: ")
+        self.label2.grid(row=6, column=2, sticky='E')
+        self.l2 = tk.Label(self, text="    ", font=("Arial", 16))
+        self.l2.grid(row=6, column=3, sticky='W')
+
+        self.label3 = tk.Label(self, text="sample rate: ")
+        self.label3.grid(row=7, column=0, sticky='E')
+        self.l3 = tk.Label(self, text="      ", font=("Arial", 16))
+        self.l3.grid(row=7, column=1, sticky='W')
+            
+        self.label4 = tk.Label(self, text="received values: ")
+        self.label4.grid(row=7, column=2, sticky='E')
+        self.l4 = tk.Label(self, text="    ", font=("Arial", 16))
+        self.l4.grid(row=7, column=3, sticky='W')
+        
 
         self.msgLabel = tk.Label(self, text="")
-        self.msgLabel.pack(padx=10, anchor=tk.W)
+        self.msgLabel.grid(row=9, column=0, columnspan=5, sticky='W')
 
 
  
@@ -97,7 +117,9 @@ class ADS1256(tk.Frame):
             self.lbox.configure(state=tk.DISABLED)
             
             self.ser.reset_input_buffer()
-            self.resetBuf()
+            if (self.ser.inWaiting() > 0):
+                self.ser.read(self.ser.inWaiting())
+            self.resetBuf(BUFFERSIZE)
             
             self.timerCallBack()
             return True
@@ -105,14 +127,6 @@ class ADS1256(tk.Frame):
             self.msg("Failed to open port "+p+"!")
             return False   
 
-
-    def update_labels(self):
-        self.boxes[0].config(text=str(self.INP))
-        self.boxes[1].config(text=str(self.INM))
-        self.boxes[2].config(text=str(self.sps)+"Hz")
-        self.boxes[3].config(text=str(self.length))
-        self.msg("Data of "+str(self.length)+" integers received")
-        print("\n")
   
     def timerCallBack(self):
         if (self.ser.is_open):
@@ -126,7 +140,7 @@ class ADS1256(tk.Frame):
                     if (len(fixed_data) == SIZE_FIXED_FORMAT):
                         
                         self.length, self.sps, self.INP, self.INM = struct.unpack(FIXED_FORMAT_STR, fixed_data)
-                        self.update_labels()
+                        self.updateStats()
                         
                         # Read the variable-length part of the struct (adc_data array)
                         adc_data_bytes = b''  # Initialize an empty byte buffer to accumulate data
@@ -137,9 +151,12 @@ class ADS1256(tk.Frame):
                             remaining_bytes = bytes_needed - len(adc_data_bytes)
                             adc_data_bytes += self.ser.read(remaining_bytes)
                             rmnd=self.ser.inWaiting()
-                            if (rmnd > 0):
+                            if (rmnd==2):
+                                self.ser.read(2)
+                            rmnd=self.ser.inWaiting()                                
+                            if (rmnd):
                                 print(f'{bytes_needed} bytes expecting, {remaining_bytes} read, {rmnd} remained in Rxbuf')
-                            #print(self.ser.read(rmnd))
+                                print(self.ser.read(rmnd))
 
                         if len(adc_data_bytes) == bytes_needed:
                             adc_data = struct.unpack('<{}i'.format(self.length), adc_data_bytes)
@@ -151,7 +168,7 @@ class ADS1256(tk.Frame):
 
             except ValueError as e:
                 self.msg("ValueError! data corrupt! "+str(e))
-                self.update_labels()
+                self.updateStats()
 
             except serial.SerialException as e:
                 self.msg("Can not read serial port! "+str(e))
@@ -185,6 +202,18 @@ class ADS1256(tk.Frame):
 
     def getBuf(self):
         return np.array(list(self.cbuf))
+
+    def updateStats(self):
+        self.l1.config(text=str(self.INP))
+        if (self.INM == -1):
+            self.l2.config(text="GND")
+        else:
+            self.l2.config(text=str(self.INM))
+        if (self.sps == ""):
+            self.l3.config(text="")
+        else:
+            self.l3.config(text=str(self.sps)+"Hz")
+        self.l4.config(text=str(self.length))    
         
     def msg(self, mess):
         self.msgLabel.config(text=mess)
@@ -209,8 +238,7 @@ class ADS1256(tk.Frame):
         if (self.tim.is_alive()):
             self.tim.cancel()
         if (self.isSerOpen()):
-            self.ser.close()
-            
+            self.ser.close()            
             
         self.msg("port closed")
         self.lbox.configure(state=tk.NORMAL)
@@ -218,73 +246,63 @@ class ADS1256(tk.Frame):
         self.closeButton.configure(state=tk.DISABLED)
         self.resetBuf(BUFFERSIZE)
         self.idx=0
-        self.boxes[0].config(text="")
-        self.boxes[1].config(text="")
-        self.boxes[2].config(text="")
-        self.boxes[3].config(text="")
+        self.INP=""
+        self.INM=""
+        self.sps=""
+        self.length=""
+        self.updateStats()
 
+# ---------- END ----- USBserial -----------------
 
 
 UPDATE_RATE = 500
-class App():
-    def __init__(self):
-        self.window = tk.Tk()
-        self.window.geometry("900x350")
-        self.window.title("Explore ADS1256")
+class Main(tk.Frame):
+    def __init__(self, window):
         
-        frame = tk.Frame(master=self.window, height=250, width=250, highlightbackground="gray", highlightthickness=1)
-        frame.pack(side=tk.LEFT, padx=10, pady=10)
-        
-        self.boxes = []        
-        for i in range(4):
-            box = tk.Label(self.window, text="", font=("Arial", 16))
-            box.pack(side=tk.LEFT, padx=10, pady=10)
-            self.boxes.append(box)
+        self.u = USBserial(window)
+        self.u.grid(row=0, column=0, padx=20, pady=20)
+                
+        self.frame = tk.Frame(master=window, height=250, width=250)
+        self.frame.grid(row=0, column=1, padx=20, pady=20)
+                  
+        self.startButton = tk.Button(self.frame, text="start real-time view", command=self.draw)
+        self.startButton.grid(row=0, pady=5)
 
-        self.ads = ADS1256(frame, self.boxes)    
+        self.stopButton = tk.Button(self.frame, text="stop real-time view", command=self.stop)
+        self.stopButton.grid(row=1, pady=5)
+
+        self.rstButton = tk.Button(self.frame, text="clear buffer", command=self.clearBuf)
+        self.rstButton.grid(row=2, pady=5)
             
-        startButton = tk.Button(self.window, text="start real-time view", command=self.draw)
-        startButton.pack(side=tk.RIGHT, padx=10)
+        self.saveButton = tk.Button(self.frame, text="start saving data")
+        self.saveButton.grid(row=3, pady=5)
 
-        stopButton = tk.Button(self.window, text="stop", command=self.stop)
-        stopButton.pack(side=tk.RIGHT, padx=10)
-
-        rstButton = tk.Button(self.window, text="reset view", command=self.rst)
-        rstButton.pack(side=tk.RIGHT, padx=10)
-        
-        frame.saveButton = tk.Button(self.window, text="start saving data", command=self.ads.saveButtonAction)
-        frame.saveButton.pack(side=tk.RIGHT, padx=10)
-
-        plt.ion() #turn interactive plotting off
-        
-        self.timer = []
-        
-        self.window.mainloop()
-
-
-
+        plt.ion() #turn interactive plotting off 
+    
     def draw(self):
         self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(111)
+        self.ax = self.fig.add_subplot()
         self.line1, = self.ax.plot(0, 0, '.r') # Returns a tuple of line objects, thus the comma
         
         self.fig.canvas.draw()  # draw the initial plot
         self.fig.canvas.flush_events()
         self.timer = self.fig.canvas.new_timer(interval=UPDATE_RATE) # set up a timer to update the plot time in ms
         self.timer.add_callback(self.updatePlot)
-        self.timer.start()
-            
+        self.timer.start()     
+
+        
             
     def updatePlot(self):
         try:
-            text = self.boxes[2].cget("text")  # Get the text from box[1]
-            sps = int(text.split("Hz")[0])
-        except (ValueError):
+            self.sps = float(self.u.sps)
+        except (ValueError) as e:
+            print(e)
             self.timer.stop()
+            self.fig.close()
             return
         
-        d=self.ads.getBuf()        
-        self.line1.set_xdata(np.linspace(0,1/sps*np.size(d),np.size(d)))
+        d=self.u.cbuf
+        self.line1.set_xdata(np.linspace(0,1/self.sps*np.size(d),np.size(d)))
         self.line1.set_ydata(d)
         self.ax.relim()
         self.ax.autoscale_view()        
@@ -296,15 +314,22 @@ class App():
         self.timer.stop()
 
 
-    def rst(self):
-        self.ads.resetBuf(BUFFERSIZE)
+    def clearBuf(self):
+        self.u.serClose()
         self.line1.set_xdata([])
         self.line1.set_ydata([])
- 
-        
-
-        
+    
+       
 
 
 if __name__ == "__main__":
-    w = App()
+    window = tk.Tk()
+    window.title("Explore ADS1256")
+    app = Main(window)
+       
+    window.mainloop()
+
+
+
+
+
