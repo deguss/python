@@ -8,8 +8,7 @@ import pdb
 import time, threading
 
 
-CALLBACK_SECONDS = 1
-BUFFERSIZE=10000
+BUFFERSIZE=30000*60*5
 from serial.tools.list_ports import comports
 import serial
 import struct
@@ -29,14 +28,14 @@ SIZE_FIXED_FORMAT = struct.calcsize(FIXED_FORMAT_STR)
 
 #----------------------------------------------------------
 class USBserial(tk.Frame):
-#----------------------------------------------------------    
-    def __init__(self, parent):
-        super().__init__()
-        tk.Frame.__init__(self, parent, height=400, width=600, highlightbackground="gray", highlightthickness=1)
+#----------------------------------------------------------
+    def __init__(self, window, parent):
+        self.parent = parent
+        tk.Frame.__init__(self, master=window, height=400, width=600, highlightbackground="gray", highlightthickness=1)
         
         self.timeout=0
         self.tim=0
-        self.resetBuf(BUFFERSIZE)
+        self.cnt=0
         self.length=0
         self.sps=0
         self.INP=0
@@ -119,7 +118,7 @@ class USBserial(tk.Frame):
             self.ser.reset_input_buffer()
             if (self.ser.inWaiting() > 0):
                 self.ser.read(self.ser.inWaiting())
-            self.resetBuf(BUFFERSIZE)
+            self.resetBuf()
             
             self.timerCallBack()
             return True
@@ -130,11 +129,11 @@ class USBserial(tk.Frame):
   
     def timerCallBack(self):
         if (self.ser.is_open):
-            self.tim = threading.Timer(CALLBACK_SECONDS, self.timerCallBack)
+            self.tim = threading.Timer(1, self.timerCallBack)
             self.tim.start()
 
             try:
-                if (self.ser.inWaiting() > 26):  #at 5Hz 5*32bit + fixed size part of the struct 
+                while (self.ser.inWaiting() > 52):  #at 5Hz 5*32bit + fixed size part of the struct 
                     # Read the fixed-size part of the struct
                     fixed_data = self.ser.read(SIZE_FIXED_FORMAT)
                     if (len(fixed_data) == SIZE_FIXED_FORMAT):
@@ -143,26 +142,30 @@ class USBserial(tk.Frame):
                         self.updateStats()
                         
                         # Read the variable-length part of the struct (adc_data array)
-                        adc_data_bytes = b''  # Initialize an empty byte buffer to accumulate data
                         bytes_needed = self.length * struct.calcsize('i')  # Calculate the total bytes needed for unpacking
                         
                         # Loop to read data in parts until enough data is accumulated
-                        while len(adc_data_bytes) < bytes_needed:
-                            remaining_bytes = bytes_needed - len(adc_data_bytes)
-                            adc_data_bytes += self.ser.read(remaining_bytes)
-                            rmnd=self.ser.inWaiting()
-                            if (rmnd==2):
-                                self.ser.read(2)
-                            rmnd=self.ser.inWaiting()                                
-                            if (rmnd):
-                                print(f'{bytes_needed} bytes expecting, {remaining_bytes} read, {rmnd} remained in Rxbuf')
-                                print(self.ser.read(rmnd))
-
-                        if len(adc_data_bytes) == bytes_needed:
-                            adc_data = struct.unpack('<{}i'.format(self.length), adc_data_bytes)
-                            self.addSamples(adc_data)
+                        read = 0
+                        if (self.ser.inWaiting() >= bytes_needed):
+                            read+=bytes_needed
+                            bin_data = self.ser.read(bytes_needed)
+                            int_data = struct.unpack('<{}i'.format(self.length), bin_data)
+                            self.cbuf.append(int_data)
+                            self.cnt+=1
+                            #if (self.cnt <= 5):
+                            #self.parent.updatePlot()
                         else:
                             self.msg("Insufficient data to unpack")
+                        """
+                        rmnd=self.ser.inWaiting()                            
+                        if (rmnd==2):
+                            self.ser.read(2)
+                        rmnd=self.ser.inWaiting()                                
+                        if (rmnd):
+                            print(f'{rmnd} bytes remained in Rxbuf')
+                            #print(self.ser.read(rmnd))
+                        """
+                            
                     else:
                         self.msg("Could not read sufficient data for header!")
 
@@ -197,26 +200,34 @@ class USBserial(tk.Frame):
         if self.ofhandle is not None:
             self.ofhandle.write('{} {}\n'.format(dt.datetime.utcnow(),f))
 
-    def resetBuf(self, bufferSize):
+    def resetBuf(self, bufferSize=BUFFERSIZE):
         self.cbuf=collections.deque(maxlen=int(bufferSize)) #reinit circ buffer
+        self.idx=0
+        self.cnt=0
 
     def getBuf(self):
         return np.array(list(self.cbuf))
 
     def updateStats(self):
         self.l1.config(text=str(self.INP))
+        
         if (self.INM == -1):
             self.l2.config(text="GND")
         else:
             self.l2.config(text=str(self.INM))
-        if (self.sps == ""):
+            
+        if (type(self.sps) == str):
             self.l3.config(text="")
         else:
             self.l3.config(text=str(self.sps)+"Hz")
-        self.l4.config(text=str(self.length))    
+            
+        if (type(self.length) == int):
+            self.l4.config(text=str(self.cnt)+"x"+str(self.length))
+        else:
+            self.l4.config(text="")
         
     def msg(self, mess):
-        self.msgLabel.config(text=mess)
+        self.msgLabel.config(text=mess[:50])
         if '?' in mess or '!' in mess:
             self.msgLabel.config(fg="red")
             print("\n"+mess+"\n")
@@ -244,22 +255,26 @@ class USBserial(tk.Frame):
         self.lbox.configure(state=tk.NORMAL)
         self.openButton.configure(state=tk.NORMAL)
         self.closeButton.configure(state=tk.DISABLED)
-        self.resetBuf(BUFFERSIZE)
+        self.resetBuf()
         self.idx=0
+        self.cnt=0
         self.INP=""
         self.INM=""
         self.sps=""
         self.length=""
         self.updateStats()
 
-# ---------- END ----- USBserial -----------------
+
 
 
 UPDATE_RATE = 500
+#----------------------------------------------------------
 class Main(tk.Frame):
+#----------------------------------------------------------    
     def __init__(self, window):
-        
-        self.u = USBserial(window)
+
+        self.fig = None
+        self.u = USBserial(window, self)
         self.u.grid(row=0, column=0, padx=20, pady=20)
                 
         self.frame = tk.Frame(master=window, height=250, width=250)
@@ -293,12 +308,15 @@ class Main(tk.Frame):
         
             
     def updatePlot(self):
+        if (self.fig == None):
+            return
+        
         try:
             self.sps = float(self.u.sps)
         except (ValueError) as e:
             print(e)
             self.timer.stop()
-            self.fig.close()
+            plt.close()
             return
         
         d=self.u.cbuf
@@ -308,14 +326,15 @@ class Main(tk.Frame):
         self.ax.autoscale_view()        
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
-        print('|', end="")
+        #print('|', end="")
+        print(f'sh={np.shape(self.u.cbuf)} avg = {np.mean(d)}')
         
     def stop(self):
         self.timer.stop()
 
 
     def clearBuf(self):
-        self.u.serClose()
+        self.u.resetBuf()
         self.line1.set_xdata([])
         self.line1.set_ydata([])
     
