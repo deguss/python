@@ -8,7 +8,7 @@ import pdb
 import time, threading
 
 
-BUFFERSIZE=30000*60*5
+BUFFERSIZE=50*60
 from serial.tools.list_ports import comports
 import serial
 import struct

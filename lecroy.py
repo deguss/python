@@ -296,10 +296,12 @@ class Lecroy(tk.Frame):
         return float(self.scope.query("TDIV?"))*10
     
     def setVertical(self, ch="C1", vscreen=1):
-        self.scope.write(ch+":VDIV "+str(vscreen/8))
+        attn = float(self.scope.query(ch+":ATTN?"))        
+        self.scope.write(ch+":VDIV "+str(vscreen/(8*attn)))
 
     def getVertical(self, ch="C2"):
-        return float(self.scope.query(ch+":VDIV?"))*8
+        attn = float(self.scope.query(ch+":ATTN?"))
+        return float(self.scope.query(ch+":VDIV?"))*8*attn
         
     def autoVertical(self, ch="C2"):
         self.scope.write(ch+":AUTO_SETUP FIND")
@@ -316,26 +318,25 @@ class Lecroy(tk.Frame):
         
     def manualVerticalEach(self, vpp, ch):        
         screen_v = self.getVertical(ch)
-        waittime = max(self.getTimeBase()*0.1,1)
         m = vpp/screen_v
 
         if (m > 0.99):                 # -> fast range down
-            self.msg("ranging down "+ch+" ("+str(round(m,3))+")")
+            self.msg(f'ranging f.down {ch} ({round(m,3)}) vpp={vpp}, screen_v={screen_v}')
             self.setVertical(ch, screen_v*8)
         elif (m > 0.9 and m < 0.99):   # -> range down
-            self.msg("ranging down "+ch+" ("+str(round(m,3))+")")
+            self.msg(f'ranging down {ch} ({round(m,3)})')
             self.setVertical(ch, screen_v*2)
         elif (vpp == 0):               #no signal in the screen
-            self.msg("ranging in progress "+ch+"... set default")
+            self.msg(f'ranging in progress {ch}... set default')
             self.setVertical(ch, 8.0)  # -> 1V/DIV
         elif (m < 0.1):                # very small signal -> turn VDIV up
-            self.msg("ranging up "+ch+" ("+str(round(m,3))+")")
+            self.msg(f'ranging f.up {ch} ({round(m,3)})')
             self.setVertical(ch, screen_v*1.2*m)
         elif (m < 0.3):
-            self.msg("ranging up "+ch+" ("+str(round(m,3))+")")
+            self.msg(f'ranging up {ch} ({round(m,3)})')
             self.setVertical(ch, screen_v/2)
         else:
-            self.msg("autoranging "+ch+" done (m="+str(round(m,3))+", 8*VDIV="+str(screen_v)+")")
+            self.msg(f'autoranging {ch} done (m={round(m,3)}, 8*VDIV={screen_v})')
 
         
     def clearSweeps(self):
@@ -381,8 +382,9 @@ class Lecroy(tk.Frame):
         
         
     def msg(self, mess):
-        current_time_str = datetime.now().strftime("%H:%M:%S.%f")
-        print(current_time_str + " \t"+mess)
+        #current_time_str = datetime.now().strftime("%H:%M:%S.%f")
+        #print(current_time_str + " \t"+mess)
+        print(mess)
         self.msgLabel.config(text=mess)
         if '?' in mess or '!' in mess:
             self.msgLabel.config(fg="red")

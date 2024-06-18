@@ -7,6 +7,7 @@ import struct
 from tkinter import Tk, filedialog
 from tkinter.messagebox import askyesno
 import os
+from tkinter_ask import *
 from pdb import *
 
 from spectrum import *
@@ -44,10 +45,7 @@ def time_to_next_hour(timestamp):
     
 if __name__ == "__main__":
 
-    print("select first .B423 file!")
-    root = Tk()
-    root.withdraw() 
-    root.attributes('-topmost', True)
+    print("select first .B423 file!")    
     absfile = filedialog.askopenfilename()
     [subfolder, firstfile]=os.path.split(os.path.abspath(absfile))
     print(subfolder,"listing files: ")
@@ -86,10 +84,23 @@ if __name__ == "__main__":
             ss = int(skip_s * smplr)
             print(f'skipping {skip_s}s or ({round(skip_s/60,2)}min) or {ss}samples')
 
-
+    duration = ask_duration("How many hours of data should each plot be made of?",
+                    ["10min", "1h", "6h", "12h", "24h"])
+    print (duration)
     answ_1 = askyesno("Display or background processing", "Do you want the plots to be displayed?")
-                      
-    buf_size=smplr*60*60*1  #buffer length x h
+
+    if ("10min" in duration):
+        buf_size=smplr*60*10
+    elif ("1h" in duration):
+        buf_size=smplr*60*60*1
+    elif ("6h" in duration):
+        buf_size=smplr*60*60*6
+    elif ("12h" in duration):
+        buf_size=smplr*60*60*12
+    else:
+        buf_size=smplr*60*60*24
+
+        
     D = np.zeros(buf_size)
     W = np.zeros(buf_size)
 
@@ -131,9 +142,10 @@ if __name__ == "__main__":
                         startdate = data_tuple[0]+data_tuple[1]/smplr
                         print("\tstart: "+time.strftime("%H:%M:%S", time.gmtime(startdate)))
                            
-                    D[elem] = 1.16026754516719e-06 * data_tuple[2] - 19.883561650656972 #mV
+                    D[elem] = 1.1704773628121347e-06 * (data_tuple[2] - 17223800) #mV calibrated
                     D[elem] = D[elem]*98.37  #scale to pA
-                    W[elem] = data_tuple[3]
+                    W[elem] = 1.1343332263852341e-07 * (data_tuple[3] - 18144000) #mV calibrated in +20dB setting
+                    W[elem] = W[elem]*9.837  #scale to pA since amplification 40dB
                             
                     elem=elem+1
                     if (elem >= fsize/30):  #EOF 
@@ -147,18 +159,28 @@ if __name__ == "__main__":
                     D=np.trim_zeros(D, 'b')                  #remove trailing 0 elements
                     W=np.trim_zeros(W, 'b')
 
-                    decimator = 50 #resample -> fnyquist = 1.25Hz
-                    res = np.interp(np.arange(0, len(D), decimator), np.arange(0, len(D)), D)
+                    decimator1 = 50 #resample -> fnyquist = 2.5Hz
+                    Dres = np.interp(np.arange(0, len(D), decimator1), np.arange(0, len(D)), D)
+
+                    decimator2 = 50 #resample -> fnyquist = 2.5Hz
+                    Wres = np.interp(np.arange(0, len(W), decimator2), np.arange(0, len(W)), W)
 
                     #convert aenometer impulses to wind speed
-                    window = np.hanning(len(W))
-                    W=W-np.mean(W)
-                    fW = np.fft.rfft(W*window)
-                    
-                    #plotCombined(res, start=startdate, disp=answ_1, smplr=smplr/decimator, folder=subfolder)
-                    plotTimeSpectroHisto(res, W, start=startdate, disp=answ_1, smplr=smplr/decimator, folder=subfolder)
+                    #W=W-np.mean(W)                    
+                    #plotCurrentAndWind(Dres, W, start=startdate, disp=answ_1, smplr=smplr/decimator, folder=subfolder)
+                    plotCurrentAndCurrent(D=Dres, fs1=smplr/decimator1, W=Wres, fs2=smplr/decimator2, start=startdate, disp=answ_1, folder=subfolder)
+
+
+                    #print(f'mean(D)={np.mean(D)}, mean(W)={np.mean(W)}')
+                    #print(f'200/mean(D)={200/np.mean(D)}, mean(W)={200/np.mean(W)}')
+                    #figure
+                    #plot(D)
+                    #plot(W)
+                    #plt.show()                    
+                    #pdb.set_trace()
 
                     D = np.zeros(buf_size)
+                    W = np.zeros(buf_size)
                     elem = 0
                 
                 

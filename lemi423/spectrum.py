@@ -4,6 +4,7 @@ import time
 import numpy as np
 import scipy.stats as sps
 import matplotlib.pyplot as plt
+from tkinter import Tk, filedialog
 import os
 import pdb
 from tempfile import TemporaryFile
@@ -13,7 +14,9 @@ def next_pow_2(f):
     x=int(f)
     return 1<<(x-1).bit_length()
 
+#------------------------------------------------------------------------------------------
 def winSpeed(W, plot=None):
+#------------------------------------------------------------------------------------------
     try:
         nfft=next_pow_2(len(W)/200)
         len_s = (len(W)-1)/250
@@ -67,37 +70,194 @@ def winSpeed(W, plot=None):
     except Exception as e:
         print(e)    
         pdb.set_trace()
+
+def cumsum_sma(array, period):
+    ret = np.cumsum(array, dtype=float)
+    ret[period:] = ret[period:] - ret[:-period]
+    return ret[period - 1:] / period
+
+#------------------------------------------------------------------------------------------
+def plotCurrentAndCurrent(D, fs1, W, fs2, start, disp, folder):
+#------------------------------------------------------------------------------------------    
+    try:
+        gs_kw = dict(width_ratios=[3, 1])
+        fig, ax = plt.subplots(ncols=2, nrows=4, figsize=(16,8), constrained_layout=True, gridspec_kw=gs_kw)
         
+        startdate=time.strftime("%Y%m%d_%H%M",time.gmtime(start))
+        day=time.strftime("%Y/%m/%d",time.gmtime(start))
+        spanD = len(D)/fs1
+        TD=np.linspace(0, spanD, len(D))
+        spanW = len(W)/fs2
+        TW=np.linspace(0, spanW, len(W))
+        if (spanD != spanW):
+            print(f'length of D ({spanD}) not equal to length of W ({spanW})')
+        xhours=spanD/3600
+
+        #------------ current timeseries plot -----------------
+        a = ax[0][0]
+        a.set_title(f'40m-wire LP-filtered current on {day} {round(xhours,2)} hour timeseries plot')
+        a.plot(TD, D,  linewidth=0.4, color='C1')
+        a.set_ylabel("Amplitude pA")
+        a.set_xlim([TD[0],TD[-1]])
+
+        
+        #------------ current spectrogram plot -----------------
+        a = ax[1][0]
+        nfft=next_pow_2(len(D)/200)
+        s_span = time.strftime("%H:%M:%S",time.gmtime(spanD))
+        Pxx, freqs, t1, im = a.specgram(D, NFFT=nfft, Fs=fs1, mode='psd',  window=mlab.window_hanning, noverlap=nfft//2)
+        a.set_ylabel("Frequency in Hz")
+        a.set_title(f'Spectrogram [span = {s_span}, Fs={fs1}Hz, nfft={nfft}, overlap={nfft//2}, window=\"hanning\"]')
+
+
+        #------------ current2 timeseries plot -----------------
+        a = ax[2][0]
+        a.set_title(f'+40dB amplified current timeseries plot')
+        a.plot(TW, W,  linewidth=0.3, color='C2', label='+40dB amplified current')
+        Wf = cumsum_sma(W, round(60*fs2))
+        Wff = cumsum_sma(W, round(60*fs2*10))
+        TWf = np.linspace(0, spanW, len(Wf))
+        TWff = np.linspace(0, spanW, len(Wff))
+        a.plot(TWf, Wf, linewidth=0.5, color='C3', label='1-min moving average filter')
+        a.plot(TWff, Wff, linewidth=1, color='C4', label='10-min moving average filter')        
+        a.legend()
+        a.set_ylabel("Amplitude pA")
+        a.set_xlim([TW[0],TW[-1]])
+
+        
+        #------------ current2 cumsum plot -----------------
+        a = ax[3][0]
+        a.set_title(f'cumulative charge')
+        a.plot(TD, np.cumsum(D/1000), color='C1', label='charge(D)')
+        a.plot(TW, np.cumsum(W/1000), color='C2', label='charge(W)')
+        a.legend()
+        a.set_ylabel("Charge nC")
+    
+
         
 
-def plotTimeSpectroHisto(D, W, start, disp, smplr, folder):
+        #----------- label axes, grid, autoscale...
+        xt = np.linspace(0,spanD,13)
+        xt_str = [''] * len(xt)
+        for a in ax[:,0]:
+            a.autoscale(enable=True, axis='x', tight=True)
+            a.grid()        
+            a.set_xticks(xt)
+            a.set_xticklabels(xt_str)
+            
+        xtt=[]
+        for x in xt:
+            xtt.append(time.strftime("%H:%M",time.gmtime(x+start)))
+        a.set_xticklabels(xtt)
+        a.set_xlabel('time (UT)')
+            
+        
+        #------------ histogram of timeseries D -----------
+        a=ax[0][1]
+        a.hist(D, bins=20, weights=1/len(D) * np.ones(len(D)),
+               orientation="horizontal", density=True, alpha=0.4, color='C1', edgecolor='none')
+        mn, mx = a.get_ylim()
+        y = np.linspace(mn, mx, 301)
+        mu = np.mean(D)
+        var = np.std(D)**2
+        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var))
+        a.plot(sps.norm.pdf(y, mu, np.sqrt(var)), y, alpha=0.6, color='C3', label=f'Normal distribution {fr}')
+        a.legend()
+        a.grid()
+
+        #------------ histogram of timeseries W -----------
+        a=ax[2][1]
+        a.hist(W, bins=20, weights=1/len(W) * np.ones(len(W)),
+               orientation="horizontal", density=True, alpha=0.4, color='C2', edgecolor='none')
+        mn, mx = a.get_ylim()
+        y = np.linspace(mn, mx, 301)
+        mu = np.mean(W)
+        var = np.std(W)**2        
+        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var))
+        a.plot(sps.norm.pdf(y, mu, np.sqrt(var)), y, alpha=0.6, color='C3',  label=f'Normal distribution {fr}')
+        a.legend()
+        a.set_title("+40dB amplified current")
+        a.grid()        
+
+        #------------ histogram of timeseries Wf -----------
+        a=ax[3][1]
+        a.hist(Wf, bins=20, weights=1/len(Wf) * np.ones(len(Wf)),
+               orientation="horizontal", density=True, alpha=0.4, color='C3', edgecolor='none')
+        mn, mx = a.get_ylim()
+        y = np.linspace(mn, mx, 301)
+        mu = np.mean(Wf)
+        var = np.std(Wf)**2
+        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var))
+        a.plot(sps.norm.pdf(y, mu, np.sqrt(var)), y, alpha=0.6, color='C3',  label=f'Normal distribution {fr}')
+        a.legend()
+        a.set_title("+40dB amplified and filtered current")
+        a.grid()
+        
+        filename=os.path.join(folder,f'{round(xhours)}h_{startdate}.npz')
+        with open(filename, 'wb') as f:
+            np.savez(f, D=D, fs1=fs1, W=W, fs2=fs2, start=start, disp=disp, folder=folder)
+            
+    except Exception as e:
+        print(e)    
+        pdb.set_trace()
+        
+
+    if (disp):
+        plt.ion()
+        plt.pause(2)
+        plt.show()
+        
+    else:
+        try:
+            filename=os.path.join(folder,f'{round(xhours)}h_{startdate}.png')
+            fig.savefig(filename, dpi=100)
+            plt.close()
+        except:
+            print("save error!")
+        else:
+            print(filename,"saved!")
+
+    if __name__ == "__main__":
+        plt.ion()
+        plt.pause(2)
+        plt.show()
+        pdb.set_trace()
+        
+        
+#------------------------------------------------------------------------------------------
+def plotCurrentAndWind(D, fs1, W, fs2, start, disp, folder):
+#------------------------------------------------------------------------------------------
     try:
         gs_kw = dict(width_ratios=[3, 1])
         fig, ax = plt.subplots(ncols=2, nrows=3, sharey='row', sharex='col', figsize=(16,8), constrained_layout=True, gridspec_kw=gs_kw)
         
         startdate=time.strftime("%Y%m%d_%H%M",time.gmtime(start))
         day=time.strftime("%Y/%m/%d",time.gmtime(start))
-        M = len(D)
-        span = M/smplr
-        T=np.linspace(0, span, M)
-        xhours=span/3600
+        spanD = len(D)/fs1
+        TD=np.linspace(0, spanD, len(D))
+        spanW = len(W)/fs2
+        TW=np.linspace(0, spanW, len(W))
+        if (spanD != spanW):
+            print(f'length of D ({spanD}) not equal to length of W ({spanW})')
+        xhours=spanD/3600
 
-        #------------ timeseries plot -----------------
+        #------------ current timeseries plot -----------------
         a = ax[0][0]
-        a.set_title(f'40m wire current on {day} {round(xhours,2)} hour plots')
-        a.plot(T, D,  linewidth=0.4)
+        a.set_title(f'40m-wire LP-filtered current on {day} {round(xhours,2)} hour timeseries plot')
+        a.plot(TD, D,  linewidth=0.4)
         a.set_ylabel("Amplitude pA")
-        a.set_xlim([T[0],T[-1]])
+        a.set_xlim([TD[0],TD[-1]])
 
         
-        #------------ spectrogram plot -----------------
-        nfft=next_pow_2(M/200)
-        s_span = time.strftime("%H:%M:%S",time.gmtime(span))
-        Pxx, freqs, t1, im = ax[1][0].specgram(D, NFFT=nfft, Fs=smplr, mode='psd',  window=mlab.window_hanning, noverlap=nfft//2)
-        ax[1][0].set_ylabel("Frequency in Hz")
-        ax[1][0].set_title(f'Spectrogram [span = {s_span}, Fs={smplr}Hz, nfft={nfft}, overlap={nfft//2}, window=\"hanning\"]')
+        #------------ current spectrogram plot -----------------
+        a = ax[1][0]
+        nfft=next_pow_2(len(D)/200)
+        s_span = time.strftime("%H:%M:%S",time.gmtime(spanD))
+        Pxx, freqs, t1, im = a.specgram(D, NFFT=nfft, Fs=fs1, mode='psd',  window=mlab.window_hanning, noverlap=nfft//2)
+        a.set_ylabel("Frequency in Hz")
+        a.set_title(f'Spectrogram [span = {s_span}, Fs={fs1}Hz, nfft={nfft}, overlap={nfft//2}, window=\"hanning\"]')
 
-        
+  
         #------------ windspeed plot -----------------
         [t, avgs] = winSpeed(W)
         a = ax[2][0]
@@ -127,16 +287,7 @@ def plotTimeSpectroHisto(D, W, start, disp, smplr, folder):
 
         
         
-        #------------ histogram of timeseries -----------
-        ax[0][1].hist(D, bins=20, orientation="horizontal", density=True, alpha=0.4, edgecolor='none')
-        # get X limits and fix them
-        mn, mx = ax[0][1].get_ylim()
-        y = np.linspace(mn, mx, 301)
-        # estimate Kernel Density and plot
-        kde = sps.gaussian_kde(D)
-        ax[0][1].plot(kde.pdf(y), y, label='KDE')
-        ax[0][1].set_title("Probability Density Function")
-        ax[0][1].grid()
+
         
 
         #------------ accumulated spectrum -----------
@@ -147,9 +298,20 @@ def plotTimeSpectroHisto(D, W, start, disp, smplr, folder):
         #ax[1][1].set_xlim([10,1000])
         ax[1][1].set_title("Power Spectral Density")
         """
+        #------------ histogram of timeseries D -----------
+        a=ax[0][1]
+        a.hist(D, bins=20, orientation="horizontal", density=True, alpha=0.4, edgecolor='none')
+        mn, mx = a.get_ylim()
+        y = np.linspace(mn, mx, 301)
+        # estimate Kernel Density and plot
+        kde = sps.gaussian_kde(D)
+        a.plot(kde.pdf(y), y, label='KDE')
+        a.set_title("Probability Density Function")
+        a.grid()
+        
 
         with open('spectrum.npz', 'wb') as f:
-            np.savez(f, D=D, W=W, start=start, disp=disp, smplr=smplr, folder=folder)
+            np.savez(f, D=D, fs1=fs1, W=W, fs2=fs2, start=start, disp=disp, folder=folder)
             
     except Exception as e:
         print(e)    
@@ -177,14 +339,10 @@ def plotTimeSpectroHisto(D, W, start, disp, smplr, folder):
     
 
 if __name__ == "__main__":
-    with np.load('spectrum.npz') as d:
-        plotTimeSpectroHisto(d['D'], d['W'], d['start'].item(), True, d['smplr'].item(), d['folder'].item())
-        #winSpeed(d['W'], plot=True)
-        if (False):
-            [t, avgs] = winSpeed(d['W'])
-            clf()
-            scatter(t, avgs, s=10, c='g', label='quiet')
-            plt.pause(1)
-            plt.show()
+    print("select an .npz file!")
+    absfile = filedialog.askopenfilename()    
+    with np.load(absfile) as d:
+        plotCurrentAndCurrent(d['D'], d['fs1'].item(), d['W'], d['fs2'].item(), d['start'].item(), True, d['folder'].item())
+
     
 

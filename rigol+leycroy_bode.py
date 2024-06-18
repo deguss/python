@@ -11,7 +11,7 @@ from rigol import *
 from lecroy import *
 
 
-VOLT = 4 
+VOLT = 0.004
 
 
 
@@ -53,7 +53,7 @@ class Bode():
         label = tk.Label(self.bodeFrame, text="steps")
         label.grid(row=3, column=0, sticky='E')
         self.steps = tk.Entry(self.bodeFrame, width=3)
-        self.steps.insert(0, "10")
+        self.steps.insert(0, "31")
         self.steps.grid(row=3, column=1, sticky='W')
 
         #choicesvar = tk.StringVar(value=self.ports)
@@ -68,23 +68,27 @@ class Bode():
         self.loadFile = tk.Button(self.bodeFrame, text="load from file", command=self.loadFile)
         self.loadFile.grid(row=3, column=3)
 
+        self.UIlinfrq = tk.IntVar()
+        self.UIcheck0 = tk.Checkbutton(self.bodeFrame, text="linear frequency sweep", variable=self.UIlinfrq)
+        self.UIcheck0.grid(row=4, columnspan=3, sticky='W')
         self.UIdisplayTimeFrq = tk.IntVar()
         self.UIcheck1 = tk.Checkbutton(self.bodeFrame, text="display time and frequency domain signals for each frequency", variable=self.UIdisplayTimeFrq)
-        self.UIcheck1.grid(row=4, columnspan=3, sticky='W')
+        self.UIcheck1.grid(row=5, columnspan=3, sticky='W')
         self.UIdisplayEachBode = tk.IntVar()
         self.UIcheck2 = tk.Checkbutton(self.bodeFrame, text="display the bode-plot of each response on each excitation frequency", variable=self.UIdisplayEachBode)
-        self.UIcheck2.grid(row=5, columnspan=3, sticky='W')
+        self.UIcheck2.grid(row=6, columnspan=3, sticky='W')
 
         self.msgLabel = tk.Label(self.bodeFrame, text="", width=50)
-        self.msgLabel.grid(row=6, columnspan=4)
+        self.msgLabel.grid(row=7, columnspan=4)
 
         self.idx=0
         atexit.register(self.scope.closeDev)
         self.window.mainloop()
         
     def msg(self, mess):
-        current_time_str = datetime.now().strftime("%H:%M:%S.%f")
-        print(current_time_str + " \t"+mess)
+        #current_time_str = datetime.now().strftime("%H:%M:%S.%f")
+        #print(current_time_str + " \t"+mess)
+        print(mess)
         self.msgLabel.config(text=mess)
         if '?' in mess or '!' in mess:
             self.msgLabel.config(fg="red")
@@ -97,10 +101,12 @@ class Bode():
             steps = int(self.steps.get())
             start_f = float(self.start_f.get())
             stop_f = float(self.stop_f.get())
-            start_freq = int(np.log10(start_f))
-            stop_freq = int(np.log10(stop_f))
-            self.frq = np.logspace(start_freq, stop_freq, steps)
-            self.waits = np.maximum(((1/self.frq) * 100), 2) # Limit the wait times to at least 2 seconds for each element
+            if (self.UIlinfrq.get() == 1):
+                self.frq = np.linspace(start_f, stop_f, steps)
+            else:
+                self.frq = np.logspace(int(np.log10(start_f)), int(np.log10(stop_f)), steps)
+                
+            self.waits = np.maximum(((1/self.frq) * 10), 2) # Limit the wait times to at least 2 seconds for each element
             self.waits = np.ceil(self.waits).astype(int) #round up to nearest integer seconds
             self.mag = np.full(steps, np.NaN)
             self.phase = np.full(steps, np.NaN)
@@ -116,7 +122,7 @@ class Bode():
             with open(self.filen+".txt", 'w') as file:
                 file.write("frequency (Hz)\tmagnitude (dB)\tphase (deg)\n")
 
-            self.msg("Total time appr. "+str(round(totals/60,2))+"min. Click start again if ok.")
+            self.msg("Total time appr. "+str(round(totals/60,2))+"min. Click start again if scope screen full!")
 
             self.rigol.configSine(frequency=self.frq[0], ampl=VOLT, offs=0)
             self.msg("outputting "+str(VOLT)+"V sine at "+str(self.frq[0])+"Hz for "+str(self.waits[0])+"sec")
@@ -131,7 +137,7 @@ class Bode():
         
 
     def adjustScopeHorizontal(self):        
-        duration = np.minimum(((1/self.frq[self.idx]) * 100), 100)
+        duration = (1/self.frq[self.idx] * 10)
         self.scope.setTimeBase(duration)
         duration = self.scope.getTimeBase()
         self.msg("scope: 10*TDIV = "+str(duration)+"s set")
@@ -166,10 +172,10 @@ class Bode():
             if (self.idx < len(self.frq)):   #if any
                 self.rigol.changeFrq(self.frq[self.idx])
                 self.msg("outputting "+str(VOLT)+"V sine at "+str(self.frq[self.idx])+"Hz")
-                self.scope.manualVertical("C2")
+                self.scope.manualVertical()
                 self.adjustScopeHorizontal()
 
-                self.window.after(int(max(1/self.frq[self.idx]*1.2 , 10) * 1000), self.stepBode)
+                self.window.after(int(self.waits[self.idx] * 1000), self.stepBode)
             else: #finished
                 self.idx=0
                 self.finishPlot()
@@ -186,6 +192,7 @@ class Bode():
 
         
     def finishPlot(self):
+        self.rigol.configSine(frequency=self.frq[0], ampl=VOLT, offs=0)
         self.rigol.dg_send('OUTP OFF')
         self.msg("finished sweeping through all "+str(len(self.frq))+" frequencies")
         self.startButton["command"] = self.initFrq
@@ -199,6 +206,7 @@ class Bode():
     def confirmation(self):
         self.plotBode(finalize=True)
         self.msg("data saved: "+str(self.filen)+"[.npy, .txt, .png]")
+        self.scope.scpi_send("BUZZ BEEP")
             
 
     def loadFile(self):
@@ -247,12 +255,12 @@ class Bode():
         ax[0][0].set_title("Bode-diagram of Y/U")
         ax[0][0].semilogx(self.frq, self.mag, 'r*-')
         ax[0][0].set(ylabel='Magnitude (dB)')
-        ax[0][0].grid()
+        ax[0][0].grid(True, which="both")
 
         ax[1][0].clear()
         ax[1][0].semilogx(self.frq, self.phase, 'r*-')
         ax[1][0].set(ylabel='Phase (deg)', xlabel='log10(frequency) (Hz)')
-        ax[1][0].grid()
+        ax[1][0].grid(True, which="both")
         plt.show(block=False)
 
         if (finalize is True): #if finished
