@@ -95,9 +95,9 @@ def plotCurrentAndCurrent(D, fs1, W, fs2, start, disp, folder):
 
         #------------ current timeseries plot -----------------
         a = ax[0][0]
-        a.set_title(f'40m-wire LP-filtered current on {day} {round(xhours,2)} hour timeseries plot')
+        a.set_title(f'DC current on {day} span={round(xhours,2)} hour timeseries plot')
         a.plot(TD, D,  linewidth=0.4, color='C1')
-        a.set_ylabel("Amplitude pA")
+        a.set_ylabel("Amplitude nA")
         a.set_xlim([TD[0],TD[-1]])
 
         
@@ -112,26 +112,26 @@ def plotCurrentAndCurrent(D, fs1, W, fs2, start, disp, folder):
 
         #------------ current2 timeseries plot -----------------
         a = ax[2][0]
-        a.set_title(f'+40dB amplified current timeseries plot')
-        a.plot(TW, W,  linewidth=0.3, color='C2', label='+40dB amplified current')
-        Wf = cumsum_sma(W, round(60*fs2))
-        Wff = cumsum_sma(W, round(60*fs2*10))
+        a.set_title(f'averaged current timeseries plot')
+        #a.plot(TW, W,  linewidth=0.3, color='C2', label='+40dB amplified current')
+        Wf = cumsum_sma(W, round(60*fs2*5))
+        Wff = cumsum_sma(W, round(60*fs2*15))
         TWf = np.linspace(0, spanW, len(Wf))
         TWff = np.linspace(0, spanW, len(Wff))
-        a.plot(TWf, Wf, linewidth=0.5, color='C3', label='1-min moving average filter')
-        a.plot(TWff, Wff, linewidth=1, color='C4', label='10-min moving average filter')        
+        a.plot(TWf, Wf, linewidth=0.5, color='C3', label='5-min moving average filter')
+        a.plot(TWff, Wff, linewidth=1.2, color='C4', label='15-min moving average filter')        
         a.legend()
-        a.set_ylabel("Amplitude pA")
+        a.set_ylabel("Amplitude nA")
         a.set_xlim([TW[0],TW[-1]])
 
         
         #------------ current2 cumsum plot -----------------
         a = ax[3][0]
         a.set_title(f'cumulative charge')
-        a.plot(TD, np.cumsum(D/1000), color='C1', label='charge(D)')
-        a.plot(TW, np.cumsum(W/1000), color='C2', label='charge(W)')
+        a.plot(TD, np.cumsum(D*1E-6), color='C1', label='charge(DC)')
+        a.plot(TW, np.cumsum(W*1E-6), color='C2', label='charge(BUF)')
         a.legend()
-        a.set_ylabel("Charge nC")
+        a.set_ylabel("Charge mC")
     
 
         
@@ -160,8 +160,9 @@ def plotCurrentAndCurrent(D, fs1, W, fs2, start, disp, folder):
         y = np.linspace(mn, mx, 301)
         mu = np.mean(D)
         var = np.std(D)**2
-        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var))
+        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var,2))
         a.plot(sps.norm.pdf(y, mu, np.sqrt(var)), y, alpha=0.6, color='C3', label=f'Normal distribution {fr}')
+        a.set_title("DC output distribution")        
         a.legend()
         a.grid()
 
@@ -173,24 +174,24 @@ def plotCurrentAndCurrent(D, fs1, W, fs2, start, disp, folder):
         y = np.linspace(mn, mx, 301)
         mu = np.mean(W)
         var = np.std(W)**2        
-        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var))
+        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var,2))
         a.plot(sps.norm.pdf(y, mu, np.sqrt(var)), y, alpha=0.6, color='C3',  label=f'Normal distribution {fr}')
         a.legend()
-        a.set_title("+40dB amplified current")
+        a.set_title("BUF output (amplified current) distribution")
         a.grid()        
 
         #------------ histogram of timeseries Wf -----------
         a=ax[3][1]
-        a.hist(Wf, bins=20, weights=1/len(Wf) * np.ones(len(Wf)),
-               orientation="horizontal", density=True, alpha=0.4, color='C3', edgecolor='none')
+        a.hist(Wff, bins=20, weights=1/len(Wff) * np.ones(len(Wff)),
+               orientation="horizontal", density=True, alpha=0.4, color='C4', edgecolor='none')
         mn, mx = a.get_ylim()
         y = np.linspace(mn, mx, 301)
         mu = np.mean(Wf)
         var = np.std(Wf)**2
-        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var))
-        a.plot(sps.norm.pdf(y, mu, np.sqrt(var)), y, alpha=0.6, color='C3',  label=f'Normal distribution {fr}')
+        fr = r'$\mu$={}, $\sigma$^2={}'.format(round(mu,2), round(var,2))
+        a.plot(sps.norm.pdf(y, mu, np.sqrt(var)), y, alpha=0.6, color='C4',  label=f'Normal distribution {fr}')
         a.legend()
-        a.set_title("+40dB amplified and filtered current")
+        a.set_title("filtered current distribution")
         a.grid()
         
         filename=os.path.join(folder,f'{round(xhours)}h_{startdate}.npz')

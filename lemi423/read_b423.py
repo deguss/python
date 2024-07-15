@@ -143,9 +143,9 @@ if __name__ == "__main__":
                         print("\tstart: "+time.strftime("%H:%M:%S", time.gmtime(startdate)))
                            
                     D[elem] = 1.1704773628121347e-06 * (data_tuple[2] - 17223800) #mV calibrated
-                    D[elem] = D[elem]*98.37  #scale to pA
+                    D[elem] = D[elem]*0.09837  #scale to nA
                     W[elem] = 1.1343332263852341e-07 * (data_tuple[3] - 18144000) #mV calibrated in +20dB setting
-                    W[elem] = W[elem]*9.837  #scale to pA since amplification 40dB
+                    W[elem] = W[elem]*0.09837  #scale to nA since amplification 20dB
                             
                     elem=elem+1
                     if (elem >= fsize/30):  #EOF 
