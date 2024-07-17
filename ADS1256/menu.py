@@ -14,7 +14,8 @@ BUFFERSIZE=50*60
 from serial.tools.list_ports import comports
 import serial
 import struct
-
+from tkinter import messagebox
+import serial.tools.list_ports
 
 #----------------------------------------------------------
 class USBserial(tk.Frame):
@@ -34,34 +35,44 @@ class USBserial(tk.Frame):
         self.ports=[]
         self.initUI()
         self.scan()
-        
-    def scan(self):
-        self.ports=[]
-        self.portBox.delete(0, 'end')
-        for port in comports():
-            self.ports.append(str(port))
-        self.portBox['values'] = self.ports
-        self.portBox.current(0)
-
 
     def initUI(self):
+
+        #root = tk.Tk()
+        #root.title("p.data")
+        #root.geometry('300x100')
+        # Create a Menu Bar
+        menubar = tk.Menu(self)
+        self.window.config(menu=menubar)
+
+        # Create an "Connect" Menu
+        connect_menu = tk.Menu(menubar,  tearoff=0)
+        menubar.add_cascade(label="Connect", menu=connect_menu)
+
+        self.port = tk.StringVar()
+        for s in self.serial_ports():
+            connect_menu.add_radiobutton(label=s, variable=self.port, command=lambda s=s: self.openSerial(s))
+        connect_menu.add_separator()
+        connect_menu.add_command(label="close ports", command=self.serClose)
+
+        # Create an "Help" Menu
+        help_menu = tk.Menu(menubar,  tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self.show_about)
+
+        # Create a Label to show status
+        status_label = tk.Label(root, text="")
+        status_label.pack(pady=10)
+
+        root.mainloop()
+        
         
         self.title = tk.Label(self, text="configuration", font=("Arial", 16)) #title
         self.title.grid(row=1, column=0, columnspan=5, sticky='nsew') # Add sticky='nsew' to make the frame fill the space
 
-        self.comPorts = tk.StringVar(value=self.ports)
-        self.portBox = ttk.Combobox(self, textvariable=self.comPorts, width=35)
-        self.portBox.bind('<<ComboboxSelected>>', self.testSerPort) 
-        self.portBox.grid(row=3, rowspan=3, column=0, columnspan=4, sticky='W', padx=10, pady=10)
 
         self.scanButton = tk.Button(self, text="scan", command=self.scan)
         self.scanButton.grid(row=2, column=0, sticky='W', padx=10, pady=0)
-        
-        self.openButton = tk.Button(self, text="open port", command=self.testSerPort)
-        self.openButton.grid(row=3, column=2, sticky='E', padx=10, pady=5)
-        
-        self.closeButton = tk.Button(self, text="close port", command=self.serClose, state=tk.DISABLED)
-        self.closeButton.grid(row=3, column=3, sticky='W', padx=10, pady=5)
 
         
 
@@ -105,6 +116,11 @@ class USBserial(tk.Frame):
         self.msgLabel = tk.Label(self, text="")
         self.msgLabel.grid(row=15, column=0, columnspan=5, sticky='W')
 
+
+    def serial_ports(self):    
+        return serial.tools.list_ports.comports()
+
+        
     def update(self, e):
         if (e == "start" or e == "stop"): #set parameters and record
             print(f'#channel set to {self.channelbox.get()}, sps set to {self.spsbox.get()}')
@@ -113,25 +129,18 @@ class USBserial(tk.Frame):
             print(f'#channel set to {self.channelbox.get()}, sps set to {self.spsbox.get()}')
 
 
- 
-    def testSerPort(self, *args):      
-        portSelected = self.comPorts.get()
-        if (self.isSerOpen() == False): #if not yet open
-            self.pr=portSelected.split()[0]
-            if(self.openSerial(self.pr) == False):
-                self.msg(f'No data received. Right port {self.pr}?')
-
 
     def openSerial(self, p):
-    # opens the serial port  p and listens to values sent by the instrument
-        try:
-            self.ser = serial.Serial(port=p, timeout=3)
-        except serial.SerialException as e:
-            self.msg(f'Could not open port! {e}')
-            return False
+        pr = str(p).split()[0]
+        if (self.isSerOpen() == False): #if not yet open
+            try:
+                self.ser = serial.Serial(port=pr, timeout=3)
+            except serial.SerialException as e:
+                self.msg(f'Could not open port! {e}')
+                return False
 
         if (self.ser.is_open):
-            self.msg(p+" opened")
+            self.msg(pr+" opened")
             self.openButton.configure(state=tk.DISABLED)
             self.closeButton.configure(state=tk.NORMAL)
             self.portBox.configure(state=tk.DISABLED)
@@ -142,11 +151,8 @@ class USBserial(tk.Frame):
             self.act1Button.configure(state=tk.NORMAL)
             self.act2Button.configure(state=tk.NORMAL)
 
-            pdb.set_trace()
             for child in self.window.frame.winfo_children():
                 child.configure(state='disable')
-            
-
             
             self.ser.reset_input_buffer()
             if (self.ser.inWaiting() > 0):
@@ -156,7 +162,7 @@ class USBserial(tk.Frame):
             self.timerCallBack()
             return True
         else:
-            self.msg("Failed to open port "+p+"!")
+            self.msg(f'Failed to open port {pr}!')
             return False   
 
   
@@ -283,7 +289,11 @@ class USBserial(tk.Frame):
         if (self.tim.is_alive()):
             self.tim.cancel()
         if (self.isSerOpen()):
-            self.ser.close()            
+            self.ser.close()
+        if (self.port.get() != ""):
+            pr = self.port.get().split()[0]
+            self.port.set("")
+            print(f'{pr} closed')            
             
         self.msg("port closed")
         self.portBox.configure(state=tk.NORMAL)
@@ -303,6 +313,10 @@ class USBserial(tk.Frame):
         self.updateStats()
         self.scan()
 
+
+
+    def show_about():
+        messagebox.showinfo("About", "precise data instruments\nVersion 1.0\n© 2024 Daniel Piri")
 
 
 
@@ -395,8 +409,4 @@ if __name__ == "__main__":
     app = Main(window)
        
     window.mainloop()
-
-
-
-
 

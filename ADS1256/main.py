@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg)
+from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg, NavigationToolbar2Tk)
 import numpy as np
 import tkinter as tk
 from tkinter import ttk
@@ -14,16 +14,15 @@ BUFFERSIZE=50*60
 from serial.tools.list_ports import comports
 import serial
 import struct
-
+from tkinter import messagebox
+import serial.tools.list_ports
 
 #----------------------------------------------------------
 class USBserial(tk.Frame):
 #----------------------------------------------------------
-    def __init__(self, window, parent):
-        self.parent = parent
+    def __init__(self, window):
         self.window = window
-        tk.Frame.__init__(self, master=window, height=400, width=600, highlightbackground="gray", highlightthickness=1)
-        
+                
         self.timeout=0
         self.tim=0
         self.cnt=0
@@ -32,121 +31,109 @@ class USBserial(tk.Frame):
         self.ofname='nr_data'
         self.ofhandle=None
         self.ports=[]
-        self.initUI()
-        self.scan()
-        
-    def scan(self):
-        self.ports=[]
-        self.portBox.delete(0, 'end')
-        for port in comports():
-            self.ports.append(str(port))
-        self.portBox['values'] = self.ports
-        self.portBox.current(0)
 
+
+        menubar = tk.Menu(self.window)
+        self.window.config(menu=menubar)
+
+        # Create a "Connect" Menu
+        connect_menu = tk.Menu(menubar,  tearoff=0)
+        menubar.add_cascade(label="Connect", menu=connect_menu)
+
+        self.port = tk.StringVar()
+        for s in self.serial_ports():
+            connect_menu.add_radiobutton(label=s, variable=self.port, command=lambda s=s: self.openSerial(s))
+        connect_menu.add_separator()
+        connect_menu.add_command(label="close ports", command=self.serClose)
+
+        # Create a "Help" Menu
+        help_menu = tk.Menu(menubar,  tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self.show_about)
+        
 
     def initUI(self):
+        self.frame = tk.Frame(master=window, height=250, width=250, highlightbackground="gray", highlightthickness=1)
+        self.frame.grid(row=0, column=0, padx=10, pady=10, sticky='new')
+        self.frame.grid_propagate(0)  
+
         
-        self.title = tk.Label(self, text="configuration", font=("Arial", 16)) #title
+        self.title = tk.Label(self.frame, text="configuration", font=("Arial", 16)) #title
         self.title.grid(row=1, column=0, columnspan=5, sticky='nsew') # Add sticky='nsew' to make the frame fill the space
 
-        self.comPorts = tk.StringVar(value=self.ports)
-        self.portBox = ttk.Combobox(self, textvariable=self.comPorts, width=35)
-        self.portBox.bind('<<ComboboxSelected>>', self.testSerPort) 
-        self.portBox.grid(row=3, rowspan=3, column=0, columnspan=4, sticky='W', padx=10, pady=10)
+        self.label2 = tk.Label(self.frame, text="time: ")
+        self.label2.grid(row=6, column=0, sticky='E')
+        self.l2 = tk.Label(self.frame, text="    ", font=("Arial", 16))
+        self.l2.grid(row=6, column=1, sticky='W')
 
-        self.scanButton = tk.Button(self, text="scan", command=self.scan)
-        self.scanButton.grid(row=2, column=0, sticky='W', padx=10, pady=0)
-        
-        self.openButton = tk.Button(self, text="open port", command=self.testSerPort)
-        self.openButton.grid(row=3, column=2, sticky='E', padx=10, pady=5)
-        
-        self.closeButton = tk.Button(self, text="close port", command=self.serClose, state=tk.DISABLED)
-        self.closeButton.grid(row=3, column=3, sticky='W', padx=10, pady=5)
-
-        
-
-        self.label1 = tk.Label(self, text="channels: ")
+        self.label1 = tk.Label(self.frame, text="channels: ")
         self.label1.grid(row=6, column=0, sticky='E')
-        self.channelbox = ttk.Combobox(self, state="disabled", values=["1", "2", "4"], width=2)
+        self.channelbox = ttk.Combobox(self.frame, values=["1", "2", "4"], width=2)
         self.channelbox.current(0)
         self.channelbox.bind('<<ComboboxSelected>>',self.update);
         self.channelbox.grid(row=6, column=1, sticky='W')
 
-        self.label2 = tk.Label(self, text="time: ")
-        self.label2.grid(row=6, column=2, sticky='E')
-        self.l2 = tk.Label(self, text="    ", font=("Arial", 16))
-        self.l2.grid(row=6, column=3, sticky='W')
-
-        self.label3 = tk.Label(self, text="sample rate: ")
+        self.label3 = tk.Label(self.frame, text="sample rate: ")
         self.label3.grid(row=7, column=0, sticky='E')
-        self.spsbox = ttk.Combobox(self, state="disabled", values=["5Hz", "10Hz", "15Hz", "25Hz", "30Hz", "50Hz", "60Hz", "100Hz", "500Hz", "1kHz", "2kHz", "3.75kHz", "7.5kHz", "15kHz", "30kHz"], width=7)
+        self.spsbox = ttk.Combobox(self.frame, values=["5Hz", "10Hz", "15Hz", "25Hz", "30Hz", "50Hz", "60Hz", "100Hz", "500Hz", "1kHz", "2kHz", "3.75kHz", "7.5kHz", "15kHz", "30kHz"], width=7)
         self.spsbox.current(0)
         self.spsbox.bind('<<ComboboxSelected>>',self.update);        
         self.spsbox.grid(row=7, column=1, sticky='W')
             
-        self.label4 = tk.Label(self, text="received values: ")
-        self.label4.grid(row=7, column=2, sticky='E')
-        self.l4 = tk.Label(self, text="    ", font=("Arial", 16))
-        self.l4.grid(row=7, column=3, sticky='W')
-
 
         self.check1var = tk.StringVar(value='1')
-        self.check1Button = tk.Checkbutton(self, variable=self.check1var, text="record to internal SD-card", state=tk.DISABLED)
-        self.check1Button.grid(row=8, columnspan=4, sticky='W', padx=10, pady=0)
+        self.check1Button = tk.Checkbutton(self.frame, variable=self.check1var, text="record to internal SD-card")
+        self.check1Button.grid(row=8, columnspan=2, sticky='W', padx=10, pady=0)
         self.check2var = tk.StringVar(value='1')
-        self.check2Button = tk.Checkbutton(self, variable=self.check2var, text="record to computer via USB", state=tk.DISABLED)
-        self.check2Button.grid(row=9, columnspan=4, sticky='W', padx=10, pady=0)
+        self.check2Button = tk.Checkbutton(self.frame, variable=self.check2var, text="record to computer via USB")
+        self.check2Button.grid(row=9, columnspan=2, sticky='W', padx=10, pady=0)
 
-        self.act1Button = tk.Button(self, text="start recording", command= lambda: self.update("start"), state=tk.DISABLED)
+        self.label4 = tk.Label(self.frame, text="received values: ")
+        self.label4.grid(row=10, column=0, sticky='E')
+        self.l4 = tk.Label(self.frame, text="    ", font=("Arial", 12))
+        self.l4.grid(row=10, column=1, sticky='W')
+
+        self.act1Button = tk.Button(self.frame, text="start recording", command= lambda: self.update("start"), state=tk.DISABLED)
         self.act1Button.grid(row=14, column=0, sticky='E', padx=10, pady=5)
-        self.act2Button = tk.Button(self, text="stop all recording", command= lambda: self.update("stop"), state=tk.DISABLED)
+        self.act2Button = tk.Button(self.frame, text="stop all recording", command= lambda: self.update("stop"))
         self.act2Button.grid(row=14, column=1, sticky='E', padx=10, pady=5)
 
-        self.msgLabel = tk.Label(self, text="")
+        self.msgLabel = tk.Label(self.frame, text="")
         self.msgLabel.grid(row=15, column=0, columnspan=5, sticky='W')
 
+    def deinitUI(self):
+        self.frame.destroy()
+
+    def serial_ports(self):    
+        return serial.tools.list_ports.comports()
+
+        
     def update(self, e):
-        if (e == "start" or e == "stop"): #set parameters and record
-            print(f'#channel set to {self.channelbox.get()}, sps set to {self.spsbox.get()}')
-            print(f'{self.check1var.get()} | {self.check2var.get()}')
-        else: #set parameters only
-            print(f'#channel set to {self.channelbox.get()}, sps set to {self.spsbox.get()}')
+        if (e == "start"):
+            self.window.data.initUI()
+            
+        if (e == "stop"):
+            self.window.data.stopTimer()
+            self.window.data.deinitUI()
+            
+        print(f'#channel set to {self.channelbox.get()}, sps set to {self.spsbox.get()}')
+        print(f'{self.check1var.get()} | {self.check2var.get()}')
+        
 
-
- 
-    def testSerPort(self, *args):      
-        portSelected = self.comPorts.get()
-        if (self.isSerOpen() == False): #if not yet open
-            self.pr=portSelected.split()[0]
-            if(self.openSerial(self.pr) == False):
-                self.msg(f'No data received. Right port {self.pr}?')
 
 
     def openSerial(self, p):
-    # opens the serial port  p and listens to values sent by the instrument
-        try:
-            self.ser = serial.Serial(port=p, timeout=3)
-        except serial.SerialException as e:
-            self.msg(f'Could not open port! {e}')
-            return False
+        pr = str(p).split()[0]
+        if (self.isSerOpen() == False): #if not yet open
+            try:
+                self.ser = serial.Serial(port=pr, timeout=3)
+            except serial.SerialException as e:
+                self.msg(f'Could not open port! {e}')
+                return False
 
         if (self.ser.is_open):
-            self.msg(p+" opened")
-            self.openButton.configure(state=tk.DISABLED)
-            self.closeButton.configure(state=tk.NORMAL)
-            self.portBox.configure(state=tk.DISABLED)
-            self.channelbox.configure(state="readonly")
-            self.spsbox.configure(state="readonly")
-            self.check1Button.configure(state=tk.NORMAL)
-            self.check2Button.configure(state=tk.NORMAL)
-            self.act1Button.configure(state=tk.NORMAL)
-            self.act2Button.configure(state=tk.NORMAL)
-
-            pdb.set_trace()
-            for child in self.window.frame.winfo_children():
-                child.configure(state='disable')
-            
-
+            self.initUI()
+            self.msg(pr+" opened")
             
             self.ser.reset_input_buffer()
             if (self.ser.inWaiting() > 0):
@@ -156,16 +143,18 @@ class USBserial(tk.Frame):
             self.timerCallBack()
             return True
         else:
-            self.msg("Failed to open port "+p+"!")
+            self.msg(f'Failed to open port {pr}!')
             return False   
 
   
     def timerCallBack(self):
         if (self.ser.is_open):
+            self.l4.config(text='waiting for data')
             self.tim = threading.Timer(1, self.timerCallBack)
             self.tim.start()
 
             try:
+                print(f'self.ser.inWaiting()={self.ser.inWaiting()}')
                 while (self.ser.inWaiting() > 52):  #at 5Hz 5*32bit + fixed size part of the struct 
                     # Read the fixed-size part of the struct
                     # Define the fixed-size part of the struct format
@@ -225,9 +214,12 @@ class USBserial(tk.Frame):
             except struct.error as e:
                 self.msg("Can not unpack data! "+str(e))
                 self.serClose()
+            except:
+                print("Something else went wrong")                
 
 
         else:
+            self.msg("Port could not be opened!") 
             self.serClose()
             
             
@@ -254,9 +246,10 @@ class USBserial(tk.Frame):
         return np.array(list(self.cbuf))
 
     def updateStats(self):
-            
+        print(self.length, self.sps, self.time, self.res16, self.res8, self.channels)
         if (type(self.length) == int):
-            self.l4.config(text=str(self.cnt)+"x"+str(self.length))
+            self.l4.config(text=f'{self.cnt}x{self.length}')
+            self.act1Button.configure(state=tk.NORMAL)
         else:
             self.l4.config(text="")
         
@@ -280,77 +273,94 @@ class USBserial(tk.Frame):
 
 
     def serClose(self):
-        if (self.tim.is_alive()):
-            self.tim.cancel()
+        if (self.tim):
+            if (self.tim.is_alive()):
+                self.tim.cancel()
         if (self.isSerOpen()):
-            self.ser.close()            
+            self.ser.close()
+        if (self.port.get() != ""):
+            pr = self.port.get().split()[0]
+            self.port.set("")
+            print(f'{pr} closed')            
             
         self.msg("port closed")
-        self.portBox.configure(state=tk.NORMAL)
-        self.openButton.configure(state=tk.NORMAL)
-        self.closeButton.configure(state=tk.DISABLED)
-        self.channelbox.configure(state="disabled")
-        self.spsbox.configure(state="disabled")
-        self.check1Button.configure(state=tk.DISABLED)
-        self.check2Button.configure(state=tk.DISABLED)
-        self.act1Button.configure(state=tk.DISABLED)
-        self.act2Button.configure(state=tk.DISABLED)        
         self.resetBuf()
         self.idx=0
         self.cnt=0
         self.sps=""
         self.length=""
         self.updateStats()
-        self.scan()
+        
+        self.deinitUI()
+        self.window.data.deinitUI()
 
+
+    def show_about(self):
+        messagebox.showinfo("About", "precise data instruments\nVersion 1.0\n© 2024 Daniel Piri")
 
 
 
 UPDATE_RATE = 500
 #----------------------------------------------------------
-class Main(tk.Frame):
+class Data(tk.Frame):
 #----------------------------------------------------------    
     def __init__(self, window):
+        self.window = window
+
+    def initUI(self):
+        self.frame = tk.Frame(master=window, height=600, width=1200, highlightbackground="gray", highlightthickness=1)
+        self.frame.grid(row=0, column=1, padx=10, pady=10, sticky='nsew')
+        self.frame.grid_propagate(0)
 
         self.fig, self.ax = plt.subplots()
-        self.u = USBserial(window, self)
-        self.u.grid(row=0, column=0, padx=20, pady=20)
-                
-        self.frame = tk.Frame(master=window, height=250, width=250, highlightbackground="gray", highlightthickness=1)
-        self.frame.grid(row=0, column=1, padx=20, pady=20)
+        
+        self.label1 = tk.Label(self.frame, text="window length:")
+        self.label1.grid(row=2, column=1, sticky='E')
+        self.channelbox = ttk.Combobox(self.frame, values=["10s", "30s", "1min", "3min", "10min", "30min", "1h", "3h", "6h", "12h", "24h"], width=5)
+        self.channelbox.current(0)
+        self.channelbox.bind('<<ComboboxSelected>>',self.update);
+        self.channelbox.grid(row=2, column=2, sticky='W')
 
-        self.title = tk.Label(self.frame, text="Data", font=("Arial", 16)) #title
-        self.title.grid(row=1, column=0, columnspan=5, sticky='nsew') # Add sticky='nsew' to make the frame fill the space
-                  
-        self.startButton = tk.Button(self.frame, text="real-time plot", command=self.initTimer)
-        self.startButton.grid(row=2, column=0, padx=5, pady=5)
+        self.autoscaley = tk.StringVar(value='1')
+        self.check1Button = tk.Checkbutton(self.frame, variable=self.autoscaley, text="autoscale y")
+        self.check1Button.grid(row=2, column=3, padx=5, pady=5)
+        
 
-        self.stopButton = tk.Button(self.frame, text="waha")
-        self.stopButton.grid(row=2, column=1, padx=5,  pady=5)
-
-        self.rstButton = tk.Button(self.frame, text="clear buffer", command=self.clearBuf)
-        self.rstButton.grid(row=2, column=2, padx=5,  pady=5)
+        self.rstButton = tk.Button(self.frame, text="reset", command=self.clearBuf)
+        self.rstButton.grid(row=2, column=4, padx=5,  pady=5)
             
         self.saveButton = tk.Button(self.frame, text="start saving data")
-        self.saveButton.grid(row=2, column=3, padx=5,  pady=5)
+        self.saveButton.grid(row=2, column=5, padx=5,  pady=5)
 
+
+        
         # Create Canvas
-        canvas = FigureCanvasTkAgg(self.fig, master=self.frame)  
-        canvas.get_tk_widget().grid(row=3, columnspan=5, sticky='nsew')
+        canvas = FigureCanvasTkAgg(self.fig, master=self.frame)
+        
+        canvas.get_tk_widget().grid(row=3, columnspan=8, sticky='nsew')
+        canvas.get_tk_widget().grid_propagate(0) #prevents it from resizing when its contents change.
         self.line1, = self.ax.plot(0, 0, '.r') # Returns a tuple of line objects, thus the comma
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
+        canvas.draw()
 
-        for child in self.frame.winfo_children():
-            child.configure(state='disable')
+        # pack_toolbar=False will make it easier to use a layout manager later on.
+        toolbar = NavigationToolbar2Tk(canvas, self.frame, pack_toolbar=False)
+        toolbar.update()
+        toolbar.grid(row=2, column=4, ipadx=40, ipady=10, sticky='ew', padx=20)
+        toolbar.grid_propagate(0)
 
-        #plt.ion() #turn interactive plotting off 
+        self.initTimer()
+
+    def deinitUI(self):
+        self.frame.destroy()
+
+
+    def update(self, event):
+        pass
     
     def initTimer(self):
         self.timer = self.fig.canvas.new_timer(interval=UPDATE_RATE) # set up a timer to update the plot time in ms
         self.timer.add_callback(self.updatePlot)
         self.timer.start()
-        self.startButton.configure(text="stop", command=self.stopTimer)
 
     def stopTimer(self):
         self.timer.stop()
@@ -361,28 +371,22 @@ class Main(tk.Frame):
             return
         
         try:
-            self.sps = float(self.u.sps)
+            self.sps = float(self.window.usb.sps)
         except (ValueError) as e:
             print(e)
             self.timer.stop()
-            plt.close()
             return
         
-        d=self.u.cbuf
+        d=self.window.usb.cbuf
         self.line1.set_xdata(np.linspace(0,1/self.sps*np.size(d),np.size(d)))
         self.line1.set_ydata(d)
         self.ax.relim()
         self.ax.autoscale_view()        
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
-        #print('|', end="")
-        #print(f'sh={np.shape(self.u.cbuf)} avg = {np.mean(d)}')
-        
-
-
 
     def clearBuf(self):
-        self.u.resetBuf()
+        self.window.usb.resetBuf()
         self.line1.set_xdata([])
         self.line1.set_ydata([])
     
@@ -391,12 +395,12 @@ class Main(tk.Frame):
 
 if __name__ == "__main__":
     window = tk.Tk()
-    window.title("Explore ADS1256")
-    app = Main(window)
+    window.iconbitmap('ic.ico')
+    window.title("precise data client")
+    window.geometry("1500x650+0+0")
+
+    window.usb = USBserial(window)
+    window.data = Data(window)
        
     window.mainloop()
-
-
-
-
 
