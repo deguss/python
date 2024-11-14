@@ -53,10 +53,27 @@ class USBserial(tk.Frame):
         
 
     def initUI(self):
+        self.frequency_map = {
+            2: "2.5Hz",
+            5: "5Hz",
+            10: "10Hz",
+            15: "15Hz",
+            25: "25Hz",
+            30: "30Hz",
+            50: "50Hz",
+            60: "60Hz",
+            100: "100Hz",
+            500: "500Hz",
+            1000: "1kHz",
+            2000: "2kHz",
+            3750: "3.75kHz",
+            7500: "7.5kHz",
+            15000: "15kHz",
+            30000: "30kHz",
+        }        
         self.frame = tk.Frame(master=window, height=250, width=250, highlightbackground="gray", highlightthickness=1)
         self.frame.grid(row=0, column=0, padx=10, pady=10, sticky='new')
         self.frame.grid_propagate(0)  
-
         
         self.title = tk.Label(self.frame, text="configuration", font=("Arial", 16)) #title
         self.title.grid(row=1, column=0, columnspan=5, sticky='nsew') # Add sticky='nsew' to make the frame fill the space
@@ -70,16 +87,14 @@ class USBserial(tk.Frame):
         self.label1.grid(row=6, column=0, sticky='E')
         self.channelbox = ttk.Combobox(self.frame, values=["1", "2", "4"], width=2)
         self.channelbox.current(0)
-        self.channelbox.bind('<<ComboboxSelected>>',self.update);
+        #self.channelbox.bind('<<ComboboxSelected>>',self.update);
         self.channelbox.grid(row=6, column=1, sticky='W')
 
         self.label3 = tk.Label(self.frame, text="sample rate: ")
         self.label3.grid(row=7, column=0, sticky='E')
-        self.spsbox = ttk.Combobox(self.frame, values=["5Hz", "10Hz", "15Hz", "25Hz", "30Hz", "50Hz", "60Hz", "100Hz", "500Hz", "1kHz", "2kHz", "3.75kHz", "7.5kHz", "15kHz", "30kHz"], width=7)
-        self.spsbox.current(0)
-        self.spsbox.bind('<<ComboboxSelected>>',self.update);        
-        self.spsbox.grid(row=7, column=1, sticky='W')
-            
+        self.spsbox = ttk.Combobox(self.frame, values=list(self.frequency_map.values()), width=7)
+        self.spsbox.current(2)
+        self.spsbox.grid(row=7, column=1, sticky='W')            
 
         self.check1var = tk.StringVar(value='1')
         self.check1Button = tk.Checkbutton(self.frame, variable=self.check1var, text="record to internal SD-card")
@@ -87,6 +102,15 @@ class USBserial(tk.Frame):
         self.check2var = tk.StringVar(value='1')
         self.check2Button = tk.Checkbutton(self.frame, variable=self.check2var, text="record to computer via USB")
         self.check2Button.grid(row=9, columnspan=2, sticky='W', padx=10, pady=0)
+
+        self.label3 = tk.Label(self.frame, text="settings")
+        self.label3.grid(row=11, column=0, sticky='E')
+        self.act3Button = tk.Button(self.frame, text="get", command= lambda: self.update("get"))
+        self.act3Button.grid(row=11, column=1, sticky='W', padx=10, pady=5)
+        self.act4Button = tk.Button(self.frame, text="set", command= lambda: self.update("set"))
+        self.act4Button.grid(row=11, column=1, sticky='N', padx=10, pady=5)
+        self.act5Button = tk.Button(self.frame, text="*RST", command= lambda: self.command_ADS("*RST"))
+        self.act5Button.grid(row=11, column=1, sticky='E', padx=10, pady=5)        
 
         self.label4 = tk.Label(self.frame, text="received values: ")
         self.label4.grid(row=10, column=0, sticky='E')
@@ -107,17 +131,60 @@ class USBserial(tk.Frame):
     def serial_ports(self):    
         return serial.tools.list_ports.comports()
 
+    def command_ADS(self, cmd):
+        self.msg(cmd)
+        self.ser.write(cmd.encode('utf-8'))
+
+    def query_ADS(self, cmd):
+        if (self.ser.inWaiting() > 0):  #discary anything in the RxBuffer
+            self.ser.read(self.ser.inWaiting())
+        self.command_ADS(cmd)
+        time.sleep(0.1)
+        if (self.ser.inWaiting() > 5):
+            return self.ser.read(self.ser.inWaiting())
+        return 0
+            
+
         
     def update(self, e):
+        if (e == "get"):
+            #self.chan = self.query_ADS("CONF:CHAN?")
+            self.sps = int(self.query_ADS("CONF:SPSI?"))
+            print(f'sample rate {self.sps} determined.')
+                # Set the combobox if there's a matching value
+            if self.sps in self.frequency_map:
+                self.spsbox.set(self.frequency_map[self.sps])            
+            
+        elif (e == "set"):
+            pass
+            
         if (e == "start"):
+            self.command_ADS("INIT:ELOG")
+            self.command_ADS("INIT:DLOG")
+            self.act1Button.config(state=tk.DISABLED)
             self.window.data.initUI()
             
-        if (e == "stop"):
+        elif (e == "stop"):
+            self.command_ADS("ABOR:ELOG")
+            self.command_ADS("ABOR:DLOG")
+            self.act1Button.config(state=tk.NORMAL)
             self.window.data.stopTimer()
             self.window.data.deinitUI()
+            self.resetBuf()
+        
+
+        else:
+
+            self.command_ADS(f'CONF:CHAN {self.channelbox.get()}')
             
-        print(f'#channel set to {self.channelbox.get()}, sps set to {self.spsbox.get()}')
-        print(f'{self.check1var.get()} | {self.check2var.get()}')
+            #self.command_ADS(f'CONF:SPS {self.spsbox.get()}')
+            
+            selected_value = self.spsbox.get()            
+            index = self.spsbox['values'].index(selected_value)  # Find the index of the selected value
+            self.command_ADS(f'CONF:SPSI {index}')
+            
+            
+            
         
 
 
@@ -134,6 +201,7 @@ class USBserial(tk.Frame):
         if (self.ser.is_open):
             self.initUI()
             self.msg(pr+" opened")
+            self.act1Button.config(state=tk.NORMAL)
             
             self.ser.reset_input_buffer()
             if (self.ser.inWaiting() > 0):
@@ -149,12 +217,11 @@ class USBserial(tk.Frame):
   
     def timerCallBack(self):
         if (self.ser.is_open):
-            self.l4.config(text='waiting for data')
+            self.l4.config(text=f'{self.ser.inWaiting()}')
             self.tim = threading.Timer(1, self.timerCallBack)
             self.tim.start()
 
             try:
-                print(f'self.ser.inWaiting()={self.ser.inWaiting()}')
                 while (self.ser.inWaiting() > 52):  #at 5Hz 5*32bit + fixed size part of the struct 
                     # Read the fixed-size part of the struct
                     # Define the fixed-size part of the struct format
@@ -246,20 +313,27 @@ class USBserial(tk.Frame):
         return np.array(list(self.cbuf))
 
     def updateStats(self):
-        print(self.length, self.sps, self.time, self.res16, self.res8, self.channels)
         if (type(self.length) == int):
             self.l4.config(text=f'{self.cnt}x{self.length}')
             self.act1Button.configure(state=tk.NORMAL)
+            if (len(self.cbuf) == 0):
+                print(f'sample rate {self.sps} determined.')
+                # Set the combobox if there's a matching value
+                if self.sps in self.frequency_map:
+                    self.spsbox.set(self.frequency_map[self.sps])
+                
         else:
             self.l4.config(text="")
         
     def msg(self, mess):
-        self.msgLabel.config(text=mess[:50])
-        if '?' in mess or '!' in mess:
-            self.msgLabel.config(fg="red")
-            print("\n"+mess+"\n")
+        if hasattr(self, 'msgLabel'):
+            self.msgLabel.config(text=mess[:50])
+            if '?' in mess or '!' in mess:
+                self.msgLabel.config(fg="red")
+            else:
+                self.msgLabel.config(fg="green")
         else:
-            self.msgLabel.config(fg="green")
+            print("\n"+mess+"\n")
 
     def isSerOpen(self):
         try:

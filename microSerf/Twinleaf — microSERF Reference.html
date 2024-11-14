@@ -1,0 +1,267 @@
+
+<!-- saved from url=(0051)https://twinleaf.com/vector/microSERF/reference/R8/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta property="property=og:image" content="/images/favicon.png">
+<title>Twinleaf — microSERF Reference</title>
+<link rel="stylesheet" type="text/css" media="all" href="./Twinleaf — microSERF Reference_files/style.css">
+<link rel="stylesheet" type="text/css" media="print" href="./Twinleaf — microSERF Reference_files/print.css">
+<link rel="alternate" href="https://twinleaf.com/rss.xml" type="application/rss+xml" title="RSS">
+<link rel="icon" type="image/x-icon" href="https://twinleaf.com/images/favicon.png">
+</head>
+
+<body>
+<header>
+
+<nav>
+
+<input type="checkbox" id="togglenav">
+<label for="togglenav" id="burger-wrapper">
+	<span id="hamburger"></span>
+</label>
+
+<a href="https://twinleaf.com/"><img src="./Twinleaf — microSERF Reference_files/Twinleaf-Logo-White.png" alt="Twinleaf"></a>
+
+<div id="menulist">
+
+<ul>
+<i>Magnetometers</i>
+<li><a href="https://twinleaf.com/scalar/PPM">PPM</a></li>
+<li><a href="https://twinleaf.com/scalar/OMG">OMG</a></li>
+<!-- <li><a href="/scalar/microSAM">microSAM</a></li> -->
+<li><a href="https://twinleaf.com/vector/microSERF">microSERF</a></li>
+<li><a href="https://twinleaf.com/vector/VMR">VMR</a></li>
+</ul>
+
+<ul>
+<i>Magnetic shielding</i>
+<li><a href="https://twinleaf.com/shield/MS-1L">MS-1L</a></li>
+<li><a href="https://twinleaf.com/shield/MS-1LF">MS-1LF</a></li>
+<li><a href="https://twinleaf.com/shield/MS-2">MS-2</a></li>
+<li><a href="https://twinleaf.com/shield/DG">DG</a></li>
+</ul>
+
+<ul>
+<i><a href="https://twinleaf.com/current">Current supplies</a></i>
+<li><a href="https://twinleaf.com/current/CSBA">CSBA</a></li>
+<li><a href="https://twinleaf.com/current/CSUA">CSUA</a></li>
+<li><a href="https://twinleaf.com/current/CSB">CSB</a></li>
+<!-- <li><a href="/current/CSBx">CSBx</a></li> -->
+</ul>
+
+<!-- <ul>
+<i>Sensor networking</i>
+<li><a href="/sync/SYNC4">SYNC4</a></li>
+<li><a href="/sync/SYNC8">SYNC8</a></li>
+<li><a href="/sync/NET">NET</a></li>
+</ul> -->
+
+<ul>
+<i>R&amp;D components</i>
+<li><a href="https://twinleaf.com/cell">VC</a></li>
+<li><a href="https://twinleaf.com/therm/TCHF">TCHF</a></li>
+</ul> 
+
+<ul>
+<i>Software support</i>
+<li><a href="https://twinleaf.com/start">Getting Started</a></li>
+<li><a href="https://twinleaf.com/comms">Interface</a></li>
+<li><a href="https://github.com/twinleaf/tio-python">Python Tools</a></li>
+<li><a href="https://github.com/twinleaf/tio-labview">Labview Tools</a></li>
+<li><a href="https://github.com/twinleaf/twinleaf-rust">Rust Library</a></li>
+<li><a href="https://github.com/twinleaf/libtio">C Library</a></li>
+<li><a href="https://github.com/twinleaf/tio-tools">C Tools</a></li>
+<li><a href="https://twinleaf.com/comms/matlab">MATLAB Use</a></li>
+</ul>
+
+<ul>
+<li><a href="https://twinleaf.com/contact">Contact</a></li>
+<li><a href="https://twinleaf.com/patents">Patents</a></li>
+<li><a href="https://twinleaf.com/about">About</a></li>
+</ul>
+
+<ul>
+<li><a href="tel:+1-609-375-0305">+1-609-375-0305</a></li>
+<li><a href="mailto:Twinleaf%20%3Cinfo@twinleaf.com%3E?subject=Inquiry">info@twinleaf.com</a></li>
+</ul>
+
+</div>
+
+</nav>
+
+</header>
+
+<main>
+<h1>SERF R8 Reference</h1>
+<h2>Data Stream Source List</h2>
+<ol start="0">
+<li><code>vector</code> – [f32]  Vector magnetic field (pT), 3 columns: x, y, z</li>
+<li><code>status</code> – [i8]  Status (1 column)</li>
+<li><code>cal</code> – [f32]  Signal calibration (arb), 3 columns: x, y, z</li>
+</ol>
+<h2>Command List</h2>
+<h3>Vector magnetometer</h3>
+<ul>
+<li><code>vector.data.active</code> – [u8] Set to 1 to include magnetic field in data stream.</li>
+<li><code>vector.data.decimation</code> – [u32] Decimation of magnetic field relative to previous data source.</li>
+<li><code>vector.data.autocutoff</code> – [u8] Set to 1 to automaticaly configure magnetic field IIR lowpass filter according to decimation.</li>
+<li><code>vector.data.cutoff</code> – [f32] Manually control magnetic field IIR lowpass filter cutoff.</li>
+<li><code>vector.data.id</code> – [u16] Returns stream ID of magnetic field.</li>
+</ul>
+<h3>Automated calibration</h3>
+<ul>
+<li><code>auto.zero</code> – Zero magnetic field. If successfully zeroed, will also calibrate.</li>
+<li><code>auto.zero.rmsthreshold</code> – [f32] Zero magnetic field until the RMS field value in nT is below this level.</li>
+<li><code>auto.calibrate</code> – Calibrate magnetic field.</li>
+<li><code>auto.calibrate.threshold</code> – [f32] minimum calibration value considered good.</li>
+</ul>
+<h3>Signal filter</h3>
+<ul>
+<li><code>filter.highpass.enable</code> – [u8] enable highpass filter.</li>
+<li><code>filter.highpass.cutoff</code> – [f32] corner frequency (Hz) for highpass filter.</li>
+</ul>
+<h3>System settings</h3>
+<ul>
+<li><code>mode.axis.x</code> – [u8:0|1] Enable measurement on X axis.</li>
+<li><code>mode.axis.y</code> – [u8:0|1] Enable measurement on Y axis.</li>
+<li><code>mode.sleep</code> – [u8:0|1] Enable sleep mode, turns off laser and heaters.</li>
+</ul>
+<h3>Current supply, X channel</h3>
+<ul>
+<li><code>coil.x.current</code> – [f32] X current output (mA).</li>
+<li><code>coil.x.current.min</code> – [f32] Y current output, minimum (mA).</li>
+<li><code>coil.x.current.max</code> – [f32] X current output, maximum (mA).</li>
+<li><code>coil.x.calibration</code> – [f32] X field calibration (in, for example, nT/mA). Purely a convenience to convert the current to a different scale.</li>
+<li><code>coil.x.field</code> – [f32] X magnetic field. Scales current according to calibration.</li>
+<li><code>coil.x.field.min</code> – [f32] X magnetic field, minimum. Scales current minimum according to calibration.</li>
+<li><code>coil.x.field.max</code> – [f32] X magnetic field, maximum. Scales current maximum according to calibration.</li>
+<li><code>coil.x.test.enable</code> – [u8] X test test modulation enable.</li>
+<li><code>coil.x.test.frequency</code> – [f32] X test test modulation frequency (Hz).</li>
+<li><code>coil.x.test.amplitude</code> – [f32] X test test modulation amplitude (RMS×sqrt(2)).</li>
+</ul>
+<h3>Current supply, Y channel</h3>
+<ul>
+<li><code>coil.y.current</code> – [f32] Y current output (mA).</li>
+<li><code>coil.y.current.min</code> – [f32] Y current output, minimum (mA).</li>
+<li><code>coil.y.current.max</code> – [f32] Y current output, maximum (mA).</li>
+<li><code>coil.y.calibration</code> – [f32] Y field calibration (in, for example, nT/mA). Purely a convenience to convert the current to a different scale.</li>
+<li><code>coil.y.field</code> – [f32] Y magnetic field. Scales current according to calibration.</li>
+<li><code>coil.y.field.min</code> – [f32] Y magnetic field, minimum. Scales current minimum according to calibration.</li>
+<li><code>coil.y.field.max</code> – [f32] Y magnetic field, maximum. Scales current maximum according to calibration.</li>
+<li><code>coil.y.test.enable</code> – [u8] Y test test modulation enable.</li>
+<li><code>coil.y.test.frequency</code> – [f32] Y test test modulation frequency (Hz).</li>
+<li><code>coil.y.test.amplitude</code> – [f32] Y test test modulation amplitude (RMS×sqrt(2)).</li>
+</ul>
+<h3>Current supply, Z channel</h3>
+<ul>
+<li><code>coil.z.current</code> – [f32] Z current output (mA).</li>
+<li><code>coil.z.current.min</code> – [f32] Z current output, minimum (mA).</li>
+<li><code>coil.z.current.max</code> – [f32] Z current output, maximum (mA).</li>
+<li><code>coil.z.calibration</code> – [f32] Z field calibration (in, for example, nT/mA). Purely a convenience to convert the current to a different scale.</li>
+<li><code>coil.z.field</code> – [f32] Z magnetic field. Scales current according to calibration.</li>
+<li><code>coil.z.field.min</code> – [f32] Z magnetic field, minimum. Scales current minimum according to calibration.</li>
+<li><code>coil.z.field.max</code> – [f32] Z magnetic field, maximum. Scales current maximum according to calibration.</li>
+<li><code>coil.z.test.enable</code> – [u8] Z test test modulation enable.</li>
+<li><code>coil.z.test.frequency</code> – [f32] Z test test modulation frequency (Hz).</li>
+<li><code>coil.z.test.amplitude</code> – [f32] Z test test modulation amplitude (RMS×sqrt(2)).</li>
+</ul>
+<h3>Magnetometer calibration</h3>
+<ul>
+<li><code>cal.x</code> – [f32] X field calibration in µV/nT.</li>
+<li><code>cal.y</code> – [f32] Y field calibration in µV/nT.</li>
+<li><code>cal.z</code> – [f32] Z field calibration in µV/nT.</li>
+<li><code>cal.x.enable</code> – [u8] Enable X field calibration measurement using test modulation.</li>
+<li><code>cal.y.enable</code> – [u8] Enable Y field calibration measurement using test modulation.</li>
+<li><code>cal.z.enable</code> – [u8] Enable Z field calibration measurement using test modulation.</li>
+<li><code>cal.data.active</code> – [u8] Set to 1 to include magnetometer calibration in data stream.</li>
+<li><code>cal.data.decimation</code> – [u32] Decimation of magnetometer calibration relative to previous data source.</li>
+<li><code>cal.data.autocutoff</code> – [u8] Set to 1 to automaticaly configure magnetometer calibration IIR lowpass filter according to decimation.</li>
+<li><code>cal.data.cutoff</code> – [f32] Manually control magnetometer calibration IIR lowpass filter cutoff.</li>
+<li><code>cal.data.id</code> – [u16] Returns stream ID of magnetometer calibration.</li>
+</ul>
+<h3>Status byte</h3>
+<ul>
+<li><code>status.data.active</code> – [u8] Set to 1 to include status in data stream.</li>
+<li><code>status.data.decimation</code> – [u32] Decimation of status relative to previous data source.</li>
+<li><code>status.data.id</code> – [u16] Returns stream ID of status.</li>
+<li><code>status.laser</code> – [f32] Fraction original laser power.</li>
+</ul>
+<h3>Device configuration memory</h3>
+<ul>
+<li><code>dev.conf.autosave</code> – [i16] Automatically save configuration specified number of seconds after changes; -1 disables. Maximum 10,000 writes.</li>
+<li><code>dev.conf.save</code> – Save configuration. Configuration is used on next power cycle.</li>
+<li><code>dev.conf.load</code> – Load configuration from last saved version.</li>
+<li><code>dev.conf.verbose</code> – [u8] Send a log message every time settings are saved.</li>
+</ul>
+<h3>Device information</h3>
+<ul>
+<li><code>dev.name</code> – Short name of device.</li>
+<li><code>dev.model</code> – Short name of device.</li>
+<li><code>dev.desc</code> – Description of device.</li>
+<li><code>dev.serial</code> – Serial number assigned to device.</li>
+<li><code>dev.revision</code> – [u16] Hardware revision number.</li>
+<li><code>dev.version_major</code> – [u16] Software version, major rev number in major.minor format.</li>
+<li><code>dev.version_minor</code> – [u16] Software version, minor rev number in major.minor format.</li>
+<li><code>dev.lock</code> – Attempts to secure advisory lock. No effect in device; useful for multi-client access control.</li>
+<li><code>dev.unlock</code> – Unlock the advisory lock. No effective in device; useful for multi-client access control.</li>
+<li><code>dev.systime</code> – [u64] Time elapsed since boot counted by microcontroller.</li>
+<li><code>dev.loglevel</code> – [u8] Set max level of log messages sent by device.</li>
+<li><code>dev.session</code> – [u32] Random number set at power on.</li>
+<li><code>dev.start</code> – Start or restart operation. Synchronization: provide a <code>tl_timebase_info</code> struct and deliver an external clock.</li>
+<li><code>dev.stop</code> – Halt operation.</li>
+<li><code>dev.reboot</code> – Restart device controller.</li>
+<li><code>dev.synctime</code> – Updates the timebase properties for an external clock. Expects a <code>tl_timebase_info</code> struct.</li>
+<li><code>dev.firmware.upload</code> – Used to upload firmware into RAM. Must issue dev.stop first. See the tio-firmware-upgrade in tio-tools.</li>
+<li><code>dev.firmware.upgrade</code> – Used to commit firmware to flash. See the tio-firmware-upgrade in tio-tools.</li>
+<li><code>dev.firmware.serial</code> – Serial number/identifier of firmware.</li>
+</ul>
+<h3>Data stream introspection</h3>
+<p>Devices have multiple data sources, sampled on specific timebases, which can be selected for streaming.</p>
+<ul>
+<li><code>data.rate</code> – Specify primary source data rate (Hz)</li>
+<li><code>data.timebase.list</code> – Number of timebases availbale on device; internal clock, external clock, etc.</li>
+<li><code>data.timebase.info</code> – Request with timebase ID, reply with timebase metadata.</li>
+<li><code>data.timebase.send</code> – Request with timebase ID, sends timebase metadata.</li>
+<li><code>data.source.list</code> – Number of data sources available on device.</li>
+<li><code>data.source.info</code> – Request with data source ID, reply with source metadata.</li>
+<li><code>data.source.send</code> – Request with data source ID, sends soure metadata as source update.</li>
+<li><code>data.stream.list</code> – Number of data streams. Most systems have only one data stream.</li>
+<li><code>data.stream.info</code> – Request with data stream ID, reply with stream metadata.</li>
+<li><code>data.stream.send</code> – Request with data stream ID, sends data stream metadata as stream update.</li>
+<li><code>data.stream.columns</code> – Number of active columns in stream.</li>
+<li><code>data.list</code> – List active streams. Request with ID to enumerate stream names.</li>
+<li><code>data.send_all</code> – Iteratively sends metadata on all timebases, sources, and streams.</li>
+<li><code>data.atomic</code> – Preface a set of atomic data stream changes.</li>
+<li><code>data.apply</code> – Apply data stream changes atomically.</li>
+</ul>
+<h3>Command introspection</h3>
+<ul>
+<li><code>rpc.list</code> – No argument: List number of RPCs. Pass [u16] ID number: returns name of RPC.</li>
+<li><code>rpc.info</code> – [u16] Return RPC metadata, 16 bits.</li>
+<li><code>rpc.listinfo</code> – Same as rpc.list, but prepends rpc.info metadata.</li>
+<li><code>rpc.id</code> – Return 16 bit ID number for named RPC.</li>
+<li><code>rpc.name</code> – [u16] Return RPC name string for 16 bit ID number.</li>
+</ul>
+<h3>Communications port configuration</h3>
+<ul>
+<li><code>dev.port.mode.text</code> – Change mode of this port to text.  A valid text rpc also switches the interface to text mode.</li>
+<li><code>dev.port.mode.binary</code> – Change mode of this port to binary. A valid binary rpc also switches the interface to binary mode.</li>
+<li><code>dev.port.mode.boot_text</code> – Change power-on mode of this port to text.</li>
+<li><code>dev.port.mode.boot_binary</code> – Change power-on mode of this port to binary.</li>
+<li><code>dev.port.rate</code> – [u32] Change bitrate of this port.</li>
+<li><code>dev.port.rate.near</code> – [u32] Report actual port bitrate.</li>
+<li><code>dev.port.rate.min</code> – [u32] Specify minimum port bitrate.</li>
+<li><code>dev.port.rate.max</code> – [u32] Specify maximum port bitrate. It can be necessary to reduce the maximum bitrate on longer cables.</li>
+<li><code>dev.port.maxrate</code> – [u32] Read the maximum supported bitrate for this port.</li>
+<li><code>dev.port.count</code> – [u32] Number of control ports.</li>
+</ul>
+
+</main>
+<footer>
+<p><a href="tel:+1-609-375-0305">+1-609-375-0305</a></p>
+<p><a href="mailto:Twinleaf%20%3Cinfo@twinleaf.com%3E?subject=Inquiry">info@twinleaf.com</a></p>
+</footer>
+
+
+
+</body></html>

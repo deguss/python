@@ -1,0 +1,25 @@
+@charset "utf-8";
+
+main {
+	margin: auto;
+	margin-top:2em;
+	margin-bottom:2em;
+	min-width: 40em;
+	max-width: 57em;
+	margin:2em;
+	box-shadow: none;
+}
+
+nav {
+	display:none;
+}
+
+main { 
+}
+
+main img {
+  box-shadow: none;
+}
+
+main a, main a:link, main a:visited { color:black; }
+
