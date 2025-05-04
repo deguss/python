@@ -25,7 +25,9 @@ class USBserial(tk.Frame):
                 
         self.timeout=0
         self.tim=0
+        self.ser = None  # Initialize serial port object
         self.cnt=0
+        self.cbuf=collections.deque(maxlen=BUFFERSIZE) #reinit circ buffer
         self.length=0
         self.sps=0                    
         self.ofname='nr_data'
@@ -101,11 +103,11 @@ class USBserial(tk.Frame):
         self.spsbox.current(2)
         self.spsbox.grid(row=7, column=1, sticky='W')            
 
-        self.check1var = tk.StringVar(value='1')
-        self.check1Button = tk.Checkbutton(self.frame, variable=self.check1var, text="record to internal SD-card")
+        self.check1var = tk.IntVar()
+        self.check1Button = tk.Checkbutton(self.frame, variable=self.check1var, text="record to internal SD-card [DLOG]")
         self.check1Button.grid(row=8, columnspan=2, sticky='W', padx=10, pady=0)
-        self.check2var = tk.StringVar(value='1')
-        self.check2Button = tk.Checkbutton(self.frame, variable=self.check2var, text="record to computer via USB")
+        self.check2var = tk.IntVar()
+        self.check2Button = tk.Checkbutton(self.frame, variable=self.check2var, text="record to computer via USB [ELOG]")
         self.check2Button.grid(row=9, columnspan=2, sticky='W', padx=10, pady=0)
 
         self.label3 = tk.Label(self.frame, text="settings")
@@ -129,6 +131,8 @@ class USBserial(tk.Frame):
 
         self.msgLabel = tk.Label(self.frame, text="")
         self.msgLabel.grid(row=15, column=0, columnspan=5, sticky='W')
+
+        self.get_command()
 
     def deinitUI(self):
         self.frame.destroy()
@@ -163,7 +167,7 @@ class USBserial(tk.Frame):
         value_at_index = list(self.frequency_map.values())[index]
         key_at_index = next(key for key, value in self.frequency_map.items() if value == value_at_index)
         print("sending command ", f'CONF:SPS {key_at_index}')
-        time.sleep(2)
+        time.sleep(0.1)
         self.command_ADS(f'CONF:SPS {key_at_index}')
             
 
@@ -182,38 +186,27 @@ class USBserial(tk.Frame):
     
     def update(self, e):                                
         if (e == "start"):
-            self.command_ADS("INIT:ELOG")
-            self.command_ADS("INIT:DLOG")
+            if (self.check1var.get()):
+                self.command_ADS("INIT:DLOG")
+            if (self.check2var.get()):
+                time.sleep(0.1)
+                self.command_ADS("INIT:ELOG")
+                self.window.data.initUI()
+                
             self.act1Button.config(state=tk.DISABLED)
-            self.window.data.initUI()
             
         elif (e == "stop"):
-            self.command_ADS("ABOR:ELOG")
-            self.command_ADS("ABOR:DLOG")
+            if (self.check1var.get()):
+                self.command_ADS("ABOR:DLOG")
+            if (self.check2var.get()):
+                time.sleep(0.1)
+                self.command_ADS("ABOR:ELOG")
+                self.window.data.stopTimer()
+                self.window.data.deinitUI()
+                self.resetBuf()
+                
             self.act1Button.config(state=tk.NORMAL)
-            self.window.data.stopTimer()
-            self.window.data.deinitUI()
-            self.resetBuf()
-        
-
-        else:
-
-            self.command_ADS(f'CONF:CHAN {self.channelbox.get()}')
             
-            #self.command_ADS(f'CONF:SPS {self.spsbox.get()}')
-            
-            selected_value = self.spsbox.get()            
-            index = self.spsbox['values'].index(selected_value)  # Find the index of the selected value
-            value_at_index = list(self.frequency_map.values())[index]
-            key_at_index = next(key for key, value in self.frequency_map.items() if value == value_at_index)
-            print("sending command ", f'CONF:SPS {key_at_index}')
-            self.command_ADS(f'CONF:SPS {key_at_index}')
-            
-            
-            
-        
-
-
 
     def openSerial(self, p):
         pr = str(p).split()[0]
@@ -396,7 +389,7 @@ class USBserial(tk.Frame):
 
 
     def show_about(self):
-        messagebox.showinfo("About", "precise data instruments\nVersion 1.0\n© 2024 Daniel Piri")
+        messagebox.showinfo("About", "precise data instruments\nVersion 1.0\n© 2025 Daniel Piri")
 
 
 
