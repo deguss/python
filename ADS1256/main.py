@@ -70,7 +70,12 @@ class USBserial(tk.Frame):
             7500: "7.5kHz",
             15000: "15kHz",
             30000: "30kHz",
-        }        
+        }
+        self.channel_map = {
+            1: "1",
+            2: "2",
+            4: "4"
+        }
         self.frame = tk.Frame(master=window, height=250, width=250, highlightbackground="gray", highlightthickness=1)
         self.frame.grid(row=0, column=0, padx=10, pady=10, sticky='new')
         self.frame.grid_propagate(0)  
@@ -85,7 +90,7 @@ class USBserial(tk.Frame):
 
         self.label1 = tk.Label(self.frame, text="channels: ")
         self.label1.grid(row=6, column=0, sticky='E')
-        self.channelbox = ttk.Combobox(self.frame, values=["1", "2", "4"], width=2)
+        self.channelbox = ttk.Combobox(self.frame, values=list(self.channel_map.values()), width=2)
         self.channelbox.current(0)
         #self.channelbox.bind('<<ComboboxSelected>>',self.update);
         self.channelbox.grid(row=6, column=1, sticky='W')
@@ -105,11 +110,11 @@ class USBserial(tk.Frame):
 
         self.label3 = tk.Label(self.frame, text="settings")
         self.label3.grid(row=11, column=0, sticky='E')
-        self.act3Button = tk.Button(self.frame, text="get", command= lambda: self.update("get"))
+        self.act3Button = tk.Button(self.frame, text="get", command= lambda: self.get_command())
         self.act3Button.grid(row=11, column=1, sticky='W', padx=10, pady=5)
-        self.act4Button = tk.Button(self.frame, text="set", command= lambda: self.update("set"))
+        self.act4Button = tk.Button(self.frame, text="set", command= lambda: self.set_command())
         self.act4Button.grid(row=11, column=1, sticky='N', padx=10, pady=5)
-        self.act5Button = tk.Button(self.frame, text="*RST", command= lambda: self.command_ADS("*RST"))
+        self.act5Button = tk.Button(self.frame, text="*RST", command= lambda: (self.command_ADS("*RST"), self.serClose()))
         self.act5Button.grid(row=11, column=1, sticky='E', padx=10, pady=5)        
 
         self.label4 = tk.Label(self.frame, text="received values: ")
@@ -140,24 +145,42 @@ class USBserial(tk.Frame):
             self.ser.read(self.ser.inWaiting())
         self.command_ADS(cmd)
         time.sleep(0.1)
-        if (self.ser.inWaiting() > 5):
+        if (self.ser.inWaiting() > 0):
             return self.ser.read(self.ser.inWaiting())
         return 0
+
+    def set_command(self):
+        channel_selected_value = self.channelbox.get()            
+        channel_index = self.channelbox['values'].index(channel_selected_value)  # Find the index of the selected value
+        channel_value = list(self.channel_map.values())[channel_index]        
+        print("sending command ", f'CONF:CHAN {channel_value}')
+        self.command_ADS(f'CONF:CHAN {channel_value}')
+            
+    
+            
+        selected_value = self.spsbox.get()            
+        index = self.spsbox['values'].index(selected_value)  # Find the index of the selected value
+        value_at_index = list(self.frequency_map.values())[index]
+        key_at_index = next(key for key, value in self.frequency_map.items() if value == value_at_index)
+        print("sending command ", f'CONF:SPS {key_at_index}')
+        time.sleep(2)
+        self.command_ADS(f'CONF:SPS {key_at_index}')
             
 
-        
-    def update(self, e):
-        if (e == "get"):
-            #self.chan = self.query_ADS("CONF:CHAN?")
-            self.sps = int(self.query_ADS("CONF:SPSI?"))
-            print(f'sample rate {self.sps} determined.')
-                # Set the combobox if there's a matching value
-            if self.sps in self.frequency_map:
-                self.spsbox.set(self.frequency_map[self.sps])            
-            
-        elif (e == "set"):
-            pass
-            
+    def get_command(self):
+        self.chan = int(self.query_ADS("CONF:CHAN?"))
+        self.sps = int(self.query_ADS("CONF:SPS?"))
+        print(f'channel number {self.chan} determined.')
+        print(f'sample rate {self.sps} determined.')
+
+        # Set the combobox if there's a matching value
+        if self.sps in self.frequency_map:
+            self.spsbox.set(self.frequency_map[self.sps])
+        if self.chan in self.channel_map:
+            self.channelbox.set(self.channel_map[self.chan])
+
+    
+    def update(self, e):                                
         if (e == "start"):
             self.command_ADS("INIT:ELOG")
             self.command_ADS("INIT:DLOG")
@@ -181,7 +204,10 @@ class USBserial(tk.Frame):
             
             selected_value = self.spsbox.get()            
             index = self.spsbox['values'].index(selected_value)  # Find the index of the selected value
-            self.command_ADS(f'CONF:SPSI {index}')
+            value_at_index = list(self.frequency_map.values())[index]
+            key_at_index = next(key for key, value in self.frequency_map.items() if value == value_at_index)
+            print("sending command ", f'CONF:SPS {key_at_index}')
+            self.command_ADS(f'CONF:SPS {key_at_index}')
             
             
             
@@ -452,6 +478,7 @@ class Data(tk.Frame):
             return
         
         d=self.window.usb.cbuf
+        print(self.sps,np.size(d))
         self.line1.set_xdata(np.linspace(0,1/self.sps*np.size(d),np.size(d)))
         self.line1.set_ydata(d)
         self.ax.relim()
