@@ -29,7 +29,7 @@ class USBserial(tk.Frame):
         self.cnt=0
         self.cbuf=collections.deque(maxlen=BUFFERSIZE) #reinit circ buffer
         self.length=0
-        self.sps=0                    
+        self.sps=0                 
         self.ofname='nr_data'
         self.ofhandle=None
         self.ports=[]
@@ -47,6 +47,11 @@ class USBserial(tk.Frame):
             connect_menu.add_radiobutton(label=s, variable=self.port, command=lambda s=s: self.openSerial(s))
         connect_menu.add_separator()
         connect_menu.add_command(label="close ports", command=self.serClose)
+
+        # Create a "Analyze" Menu
+        analyze_menu = tk.Menu(menubar,  tearoff=0)
+        menubar.add_cascade(label="Analyze", menu=analyze_menu)
+        analyze_menu.add_command(label="open data file", command=self.openFile)
 
         # Create a "Help" Menu
         help_menu = tk.Menu(menubar,  tearoff=0)
@@ -133,6 +138,9 @@ class USBserial(tk.Frame):
         self.msgLabel.grid(row=15, column=0, columnspan=5, sticky='W')
 
         self.get_command()
+
+    def openFile(self):
+        pass
 
     def deinitUI(self):
         self.frame.destroy()
@@ -244,21 +252,22 @@ class USBserial(tk.Frame):
                 while (self.ser.inWaiting() > 52):  #at 5Hz 5*32bit + fixed size part of the struct 
                     # Read the fixed-size part of the struct
                     # Define the fixed-size part of the struct format
-                    FIXED_FORMAT_STR = '<HHIHBB'
+                    # H..uint16, I..uint32, B..uint8
+                    FIXED_FORMAT_STR = '<HHIBBH'
                     """
                         uint16_t length;
                         uint16_t sps;
-                        uint32_t time;
+                        uint32_t epochtime;
+                        uint8_t gain;
+                        uint8_t channel;
                         uint16_t res16;
-                        uint8_t  res8;
-                        uint8_t channels;
                         int32_t data[ADCBUFLEN];
                     """
                     leng = struct.calcsize(FIXED_FORMAT_STR)                 
                     fixed_data = self.ser.read(leng)
                     if (len(fixed_data) == leng):
                         
-                        self.length, self.sps, self.time, self.res16, self.res8, self.channels = struct.unpack(FIXED_FORMAT_STR, fixed_data)
+                        self.length, self.sps, self.epochtime, self.gain, self.channel, self.res16 = struct.unpack(FIXED_FORMAT_STR, fixed_data)
                         self.updateStats()
                         
                         # Read the variable-length part of the struct (adc_data array)
