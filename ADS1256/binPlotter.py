@@ -22,16 +22,30 @@ def read_log_file(log_filename):
 
 def load_all_blocks(filename):
     data_blocks = []
+    filesize = os.path.getsize(filename)
+    read_bytes = 0
+    block_counter = 0
+
     with open(filename, 'rb') as f:
         while True:
             header = f.read(HEADER_SIZE)
             if len(header) != HEADER_SIZE:
                 break
-            length, sps, epochtime, gain, channel, res16 = struct.unpack(FIXED_FORMAT_STR, header)
-            data = np.fromfile(f, dtype=np.int32, count=length)
-            if len(data) != length:
-                print("Warning: Incomplete data block detected, skipping.")
+            try:
+                length, sps, epochtime, gain, channel, res16 = struct.unpack(FIXED_FORMAT_STR, header)
+            except struct.error:
+                print("Invalid header detected. Stopping.")
                 break
+
+            read_bytes += HEADER_SIZE
+
+            data = np.fromfile(f, dtype=np.int32, count=length)
+            read_bytes += data.nbytes
+
+            if len(data) != length:
+                print(f"Warning: Incomplete data block at block {block_counter}, stopping.")
+                break
+
             block = {
                 'length': length,
                 'sps': sps,
@@ -42,7 +56,15 @@ def load_all_blocks(filename):
                 'data': data
             }
             data_blocks.append(block)
+            block_counter += 1
+
+            # Show progress
+            if block_counter % 10 == 0 or read_bytes >= filesize:
+                percent = min(100, int((read_bytes / filesize) * 100))
+                print(f"Reading progress: {percent}% ({read_bytes // 1024} KB)")
+
     return data_blocks
+
 
 def plot_blocks(blocks, start_day, start_time):
     if not blocks:
@@ -115,6 +137,25 @@ def main():
     start_time = log_info.get("start_time", "Unknown Time")
 
     blocks = load_all_blocks(bin_file)
+    if blocks:
+            # Create output filename based on HHMM
+            hhmm = os.path.splitext(os.path.basename(bin_file))[0][-4:]  # assumes filename ends in HHMM
+            npz_path = os.path.join(os.path.dirname(bin_file), f"{hhmm}.npz")
+
+            # Flatten all blocks into arrays for storage
+            times = []
+            values = []
+            for blk in blocks:
+                time_step = 1.0 / blk['sps']
+                blk_time = np.arange(blk['length']) * time_step + blk['epochtime']
+                times.append(blk_time)
+                values.append(blk['data'])
+
+            np.savez_compressed(npz_path,
+                                times=np.concatenate(times),
+                                values=np.concatenate(values),
+                                meta=log_info)
+            print(f"Data saved to: {npz_path}")    
     plot_blocks(blocks, start_day, start_time)
 
 if __name__ == "__main__":
