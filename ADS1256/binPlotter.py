@@ -108,18 +108,29 @@ class BinPlotterApp:
                 start_time = datetime.fromtimestamp(epochtime, tz=timezone.utc)  # Apply 27 seconds adjustment
                 start_time_str = start_time.strftime('%Y-%m-%d %H:%M')
                 end_time = start_time + total_duration
-                estimated_end_day = end_time.strftime('%Y-%m-%d')
-                estimated_end_time = end_time.strftime('%H:%M')
+                estimated_end_str = end_time.strftime('%Y-%m-%d %H:%M')
 
                 log_summary = "\n".join([f"{k}: {v}" for k, v in self.meta.items()]) if self.meta else "No .txt log info"
                 header_info = (
                     f"Header:\n  length={length}, sps={sps}, time={epochtime}, gain={gain}, channel={channel}, res16={res16}\n"
                     f"blocks: {estimated_blocks}, File size: {filesize // (1024 * 1024)} MB\n"
                     f"start date & time:  {start_time_str}\n"
-                    f"Estimated end time: {estimated_end_day} {estimated_end_time}\n"
+                    f"Estimated end time: {estimated_end_str}\n"
                     f"Estimated file duration: {total_duration}\n"   
                 )
 
+                # Create or meta dictionary with first header info
+                self.meta = {
+                    'start': start_time_str,
+                    'end': estimated_end_str,
+                    'duration': total_duration,
+                    'b_length': length,
+                    'sps': sps,
+                    'epochtime': epochtime,
+                    'gain': gain,
+                    'channel': channel,
+                    'res16': res16
+                }
                 self.set_info_text(f"{header_info}\n{log_summary}")
                 self.status_label.config(text="Ready to load file blocks...")
         except Exception as e:
@@ -226,8 +237,6 @@ class BinPlotterApp:
                 dt_start = self.epoch_to_datetime(corrected_epoch)
                 self.start_day = dt_start.strftime('%Y-%m-%d')
                 self.start_time = dt_start.strftime('%H:%M')
-                self.meta['start_day'] = self.start_day
-                self.meta['start_time'] = self.start_time
 
                 start_time = epochtime  # First block's epochtime for initial time reference
 
@@ -313,6 +322,7 @@ class BinPlotterApp:
                                        f"Last block epoch: {last_block_epoch}\n"
                                        f"Calculated end time: {calculated_end_time}\n"
                                        f"Time drift from last block: {drift:.2f} seconds")
+                
                     if abs(drift) > 2:  # If drift exceeds 2 seconds, warn user
                         self.status_label.config(text=f"Warning: Time drift detected: {drift:.2f} seconds")
                     else:
@@ -328,9 +338,7 @@ class BinPlotterApp:
                 # Correct the start time by converting the epochtime to a proper datetime
                 start_time = datetime.fromtimestamp(start_epoch_time, tz=timezone.utc)  # Convert epoch to UTC datetime (timezone-aware)
                 self.start_day = start_time.strftime('%Y-%m-%d')
-                self.start_time = start_time.strftime('%H:%M')
-                self.meta['start_day'] = self.start_day
-                self.meta['start_time'] = self.start_time                
+                self.start_time = start_time.strftime('%H:%M')            
 
                 # Variable to keep track of the running total time
                 current_time = start_time
