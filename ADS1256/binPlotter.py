@@ -11,6 +11,7 @@ from matplotlib.dates import AutoDateLocator, DateFormatter
 from matplotlib.widgets import SpanSelector
 from datetime import timedelta, datetime, timezone
 import code # for interactive shell
+import traceback
 
 FIXED_FORMAT_STR = '<HHIBBH'
 HEADER_SIZE = struct.calcsize(FIXED_FORMAT_STR)
@@ -358,6 +359,14 @@ class BinPlotterApp:
                 self.times = np.concatenate(times)
                 self.values = np.concatenate(values)
 
+                # Later, update it like this:
+                self.meta.update({
+                    'num_samples': int(self.values.size),
+                    'blocks_loaded': block_counter,
+                    'estimated_end_epoch': round(calculated_end_time, 3),
+                    'final_drift_sec': round(drift, 3)                    
+                })
+                
                 # Save to npz
                 base = os.path.splitext(os.path.basename(self.filename))[0]
                 npz_path = os.path.join(os.path.dirname(self.filename), f"{base}.npz")
@@ -368,7 +377,8 @@ class BinPlotterApp:
                 self.plot_button.config(state='normal')
 
         except Exception as e:
-            messagebox.showerror("Reading Block Error", f"Error during reading: {e}")
+            tb = traceback.format_exc()
+            messagebox.showerror("Reading Block Error", f"Error: {e}\n\n{tb}")
             self.abort_button.config(state='disabled')
 
 
@@ -381,17 +391,24 @@ class BinPlotterApp:
             data = np.load(npz_path, allow_pickle=True)
             self.times = data['times']
             self.values = data['values']
-            self.meta = data['meta'].item() if isinstance(data['meta'], np.ndarray) else data['meta']
-            self.start_day = self.meta.get("start_day", "Unknown Date")
-            self.start_time = self.meta.get("start_time", "Unknown Time")
-            info = f"Loaded: {npz_path}\nStart: {self.start_day} {self.start_time}"
+
+            # Properly handle meta stored as 0-d ndarray
+            meta_raw = data['meta']
+            self.meta = meta_raw.item() if isinstance(meta_raw, np.ndarray) else dict(meta_raw)
+
+            # Parse the start datetime string from meta
+            start_str = self.meta.get("start", "Unknown")
+            info = f"Loaded: {npz_path}\nStart: {start_str}"
             if self.meta:
                 info += "\n" + "\n".join([f"{k}: {v}" for k, v in self.meta.items()])
+
             self.set_info_text(info)
             self.plot_button.config(state='normal')
+
         except Exception as e:
             self.set_info_text(f"Failed to load .npz: {e}")
             self.plot_button.config(state='disabled')
+
 
     def read_log_file(self, log_filename):
         log_info = {}

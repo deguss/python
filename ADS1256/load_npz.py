@@ -21,12 +21,19 @@ class NPZViewerApp:
 
         self.textbox = tk.Text(self.root, width=50, height=10, wrap=tk.WORD)
         self.textbox.pack(pady=10)
+        self.textbox.bind('<Control-c>', self.copy)
 
         self.shell_button = tk.Button(self.root, text="Open Shell Interactive", command=self.open_shell)
         self.shell_button.pack(pady=10)
 
         self.data = None
         self.extracted_vars = {}
+
+    def copy(self, event=None):
+        self.root.clipboard_clear()
+        text = self.textbox.get("sel.first", "sel.last")
+        self.root.clipboard_append(text)
+        return 'break'        
 
     def load_npz_file(self):
         npz_path = filedialog.askopenfilename(title="Select .npz data file", filetypes=[("NPZ Files", "*.npz")])
