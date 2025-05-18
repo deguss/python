@@ -5,10 +5,12 @@ import struct
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+plt.rcParams['agg.path.chunksize'] = 10000  # Increase the chunksize to 10,000
 import matplotlib.dates as mdates
 from matplotlib.dates import AutoDateLocator, DateFormatter
 from matplotlib.widgets import SpanSelector
 from datetime import timedelta, datetime, timezone
+import code # for interactive shell
 
 FIXED_FORMAT_STR = '<HHIBBH'
 HEADER_SIZE = struct.calcsize(FIXED_FORMAT_STR)
@@ -53,6 +55,13 @@ class BinPlotterApp:
 
         self.plot_button = tk.Button(self.button_frame, text="Plot", command=self.plot_data, state='disabled')
         self.plot_button.grid(row=0, column=3, padx=5)
+
+        self.inspect_button = tk.Button(self.button_frame, text="Inspect Variables", command=self.inspect_variables)
+        self.inspect_button.grid(row=0, column=4, padx=5)
+
+        self.save_button = tk.Button(self.button_frame, text="Save Workspace", command=self.save_workspace)
+        self.save_button.grid(row=0, column=5, padx=5)
+        
 
     def set_info_text(self, content):
         self.info_text.config(state='normal')
@@ -138,12 +147,68 @@ class BinPlotterApp:
         start_date = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)  # Base start date
         return start_date + timedelta(seconds=epochtime)
 
+    def inspect_variables(self):
+        # Check and display the actual variables and their names
+        if hasattr(self, 'times') and self.times is not None:
+            print(f"times: shape={self.times.shape}, dtype={self.times.dtype}")
+        else:
+            print("times: None")
+
+        if hasattr(self, 'values') and self.values is not None:
+            print(f"values: shape={self.values.shape}, dtype={self.values.dtype}")
+        else:
+            print("values: None")
+
+        if hasattr(self, 'meta') and isinstance(self.meta, dict):
+            print("meta keys:", list(self.meta.keys()))
+        else:
+            print("meta: None or invalid")
+
+        if hasattr(self, 'sps') and self.sps is not None:
+            print(f"sps: {self.sps}")
+        else:
+            print("sps: None")
+
+        if hasattr(self, 'gain') and self.gain is not None:
+            print(f"gain: {self.gain}")
+        else:
+            print("gain: None")
+        
+        # Add any other relevant variables you need to display
+        if hasattr(self, 'start_day') and self.start_day is not None:
+            print(f"start_day: {self.start_day}")
+        if hasattr(self, 'start_time') and self.start_time is not None:
+            print(f"start_time: {self.start_time}")
+
+        # Once variables are printed, give control back to the user in an interactive shell
+        # code.interact(local=locals())
+        threading.Thread(target=lambda: code.interact(local=globals())).start()
+
+    
+    def save_workspace(self):
+        if self.times is None or self.values is None:
+            messagebox.showinfo("Save Error", "No data to save.")
+            return
+
+        save_path = filedialog.asksaveasfilename(defaultextension=".npz", filetypes=[("NPZ files", "*.npz")])
+        if not save_path:
+            return
+
+        try:
+            np.savez_compressed(save_path, times=self.times, values=self.values, meta=self.meta)
+            messagebox.showinfo("Saved", f"Workspace saved to:\n{save_path}")
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Could not save file:\n{e}")
+
+
 
     def read_blocks_thread(self):
         self.blocks = []
         filesize = os.path.getsize(self.filename)
         read_bytes = 0
         block_counter = 0
+        expected_end_epoch = None
+        start_time = None
 
         self.status_label.config(text="Reading file...")
         self.progress.config(maximum=filesize)
@@ -155,13 +220,6 @@ class BinPlotterApp:
                 if len(header) != HEADER_SIZE:
                     raise ValueError("File too short or corrupted")
                 length, sps, epochtime, gain, channel, res16 = struct.unpack(FIXED_FORMAT_STR, header)
-                self.meta = {
-                    'length': length,
-                    'sps': sps,
-                    'gain': gain,
-                    'channel': channel,
-                    'res16': res16
-                }
 
                 # Compute and store start time
                 corrected_epoch = epochtime - length / sps
@@ -171,7 +229,11 @@ class BinPlotterApp:
                 self.meta['start_day'] = self.start_day
                 self.meta['start_time'] = self.start_time
 
+                start_time = epochtime  # First block's epochtime for initial time reference
+
                 f.seek(0)  # Go back to start for full read
+
+                total_duration = 0  # Track total duration
 
                 while not self.abort_flag:
                     header = f.read(HEADER_SIZE)
@@ -190,8 +252,7 @@ class BinPlotterApp:
                         break
 
                     block_counter += 1
-                    if (block_counter > 1): #dismiss first block (as they are from an earlier time
-                        
+                    if block_counter > 1:  # dismiss first block
                         self.blocks.append({
                             'length': length,
                             'sps': sps,
@@ -202,44 +263,107 @@ class BinPlotterApp:
                             'data': data
                         })
 
+                        # Check for time consistency and drift after every block
+                        # Calculate expected time for this block based on previous
+                        elapsed_time = length / sps  # Time duration of this block
+                        total_duration += elapsed_time
+
+                        # Check if current epochtime is close to the expected one
+                        drift = abs(epochtime - (start_time + total_duration))
+
+                        if drift > 2:  # 2 seconds threshold for drift
+                            self.status_label.config(text=f"Time drift detected in block {block_counter}")
+                            self.set_info_text(f"Drift detected at block {block_counter}:\n"
+                                               f"Expected epochtime: {start_time + total_duration:.2f}\n"
+                                               f"Actual epochtime: {epochtime}\n"
+                                               f"Drift: {drift:.2f} seconds")
+                            self.abort_flag = True
+                            self.abort_button.config(state='normal')
+                            break
 
                         if block_counter % 10 == 0 or read_bytes >= filesize:
                             self.progress["value"] = read_bytes
                             self.master.update_idletasks()
                             self.status_label.config(text=f"Loaded {read_bytes // 1024} KB")
 
-            if self.abort_flag:
-                self.status_label.config(text="Loading aborted.")
+                if self.abort_flag:
+                    self.status_label.config(text="Loading aborted due to time drift.")
+                    self.abort_button.config(state='disabled')
+                    return
+
+                self.status_label.config(text=f"Done. Loaded {block_counter} blocks.")
                 self.abort_button.config(state='disabled')
-                return
 
-            self.status_label.config(text=f"Done. Loaded {block_counter} blocks.")
-            self.abort_button.config(state='disabled')
+                # Now calculate the final time duration and compare with the last block's epochtime
+                if self.blocks:
+                    # Expected total duration (in seconds)
+                    calculated_total_seconds = total_duration
 
-            # Convert blocks to arrays
-            times = []
-            values = []
-            for blk in self.blocks:
-                time_step = 1.0 / blk['sps']
-                start_time = blk['epochtime']
-                blk_time = np.arange(blk['length']) * time_step
-                times.append(blk_time)
-                values.append(blk['data'])
-            self.times = np.concatenate(times)
-            self.values = np.concatenate(values)
+                    # Get the expected end epochtime from the last block
+                    last_block = self.blocks[-1]
+                    last_block_epoch = last_block['epochtime']
 
-            # Save to npz
-            base = os.path.splitext(os.path.basename(self.filename))[0]
-            npz_path = os.path.join(os.path.dirname(self.filename), f"{base}.npz")
-            np.savez_compressed(npz_path, times=self.times, values=self.values, meta=self.meta)
-            self.status_label.config(text=f"Saved to {npz_path}")
-            print(f"Saved to {npz_path}")
+                    # Display difference between expected and actual end times
+                    calculated_end_time = start_time + calculated_total_seconds
+                    drift = last_block_epoch - calculated_end_time
 
-            self.plot_button.config(state='normal')
+                    self.set_info_text(f"Total blocks: {block_counter}\n"
+                                       f"Start Date: {self.start_day} {self.start_time}\n"
+                                       f"Calculated total duration: {calculated_total_seconds:.2f} seconds\n"
+                                       f"Last block epoch: {last_block_epoch}\n"
+                                       f"Calculated end time: {calculated_end_time}\n"
+                                       f"Time drift from last block: {drift:.2f} seconds")
+                    if abs(drift) > 2:  # If drift exceeds 2 seconds, warn user
+                        self.status_label.config(text=f"Warning: Time drift detected: {drift:.2f} seconds")
+                    else:
+                        self.status_label.config(text=f"No significant time drift detected.")
+
+                # Convert blocks to arrays for plotting [times] and [values]
+                times = []
+                values = []
+
+                # Start time of the first block (in epoch time)
+                start_epoch_time = self.blocks[0]['epochtime']  # Get the epochtime of the first block
+
+                # Correct the start time by converting the epochtime to a proper datetime
+                start_time = datetime.fromtimestamp(start_epoch_time, tz=timezone.utc)  # Convert epoch to UTC datetime (timezone-aware)
+                self.start_day = start_time.strftime('%Y-%m-%d')
+                self.start_time = start_time.strftime('%H:%M')
+                self.meta['start_day'] = self.start_day
+                self.meta['start_time'] = self.start_time                
+
+                # Variable to keep track of the running total time
+                current_time = start_time
+
+                for blk in self.blocks:
+                    # Time step based on the block's sample rate (sps)
+                    time_step = 1.0 / blk['sps']  # Seconds per sample
+                    blk_time = np.arange(blk['length']) * time_step  # Generate an array of time steps in seconds
+                    blk_time = start_epoch_time + np.arange(blk['length']) / blk['sps']
+                    times.append(blk_time)
+                    values.append(blk['data'])
+
+                    # Update the current time for the next block
+                    current_time = blk_time[-1] + time_step
+
+                # Concatenate all times and values for the complete data
+                self.times = np.concatenate(times)
+                self.values = np.concatenate(values)
+
+                # Save to npz
+                base = os.path.splitext(os.path.basename(self.filename))[0]
+                npz_path = os.path.join(os.path.dirname(self.filename), f"{base}.npz")
+                np.savez_compressed(npz_path, times=self.times, values=self.values, meta=self.meta)
+                self.status_label.config(text=f"Saved to {npz_path}")
+                print(f"Saved to {npz_path}")
+
+                self.plot_button.config(state='normal')
 
         except Exception as e:
-            self.status_label.config(text=f"Error: {e}")
+            messagebox.showerror("Reading Block Error", f"Error during reading: {e}")
             self.abort_button.config(state='disabled')
+
+
 
     def load_npz_file(self):
         npz_path = filedialog.askopenfilename(title="Select .npz data file", filetypes=[("NPZ Files", "*.npz")])
@@ -279,31 +403,38 @@ class BinPlotterApp:
             messagebox.showinfo("Info", "No data loaded.")
             return
 
-        # Convert epochtime (seconds since 1981-08-26 00:00:27 UTC) to datetime objects
         try:
-            # Convert relative time to absolute epoch using the base epoch from first block
-            epoch_base = self.blocks[0]['epochtime']
-            times_dt = [self.epoch_to_datetime(epoch_base + t) for t in times_to_plot]
+            # Downsampling
+            MAX_POINTS = 10000
+            times = self.times
+            values = self.values
 
-            start_dt = times_dt[0]
-            end_dt = times_dt[-1]            
+            if len(times) != len(values):
+                raise ValueError("Mismatch between times and values length")
+
+            if len(times) > MAX_POINTS:
+                step = len(times) // MAX_POINTS
+                times_to_plot = times[::step]
+                values_to_plot = values[::step]
+            else:
+                times_to_plot = times
+                values_to_plot = values
+
+            # Convert relative times to absolute datetime using epoch from first block
+            if not self.blocks:
+                raise ValueError("No block metadata available for epoch correction.")
+
+            epoch_base = self.blocks[0]['epochtime']
+            print(f"First entry in times_to_plot: {times_to_plot[0]} (type: {type(times_to_plot[0])})")
+
+            start_dt = self.epoch_to_datetime(times_to_plot[0])
+            end_dt = self.epoch_to_datetime(times_to_plot[-1])
             title_str = f"Start: {start_dt.strftime('%Y-%m-%d %H:%M:%S')} — End: {end_dt.strftime('%H:%M:%S')}"
             print(title_str)
 
-            MAX_POINTS = 100000  # Plotting more than this isn't useful for humans
-            if len(self.times) > MAX_POINTS:
-                step = len(self.times) // MAX_POINTS
-                times_to_plot = self.times[::step]
-                values_to_plot = self.values[::step]
-            else:
-                times_to_plot = self.times
-                values_to_plot = self.values
-
-            times_dt = [self.epoch_to_datetime(t) for t in times_to_plot]
-
             # Plotting
             fig, ax = plt.subplots(figsize=(12, 6))
-            ax.plot(times_dt, values_to_plot)
+            ax.plot(times_to_plot, values_to_plot, linewidth=0.8)
             ax.set_title(title_str)
             ax.set_xlabel("Time (UTC)")
             ax.set_ylabel("ADC Value")
@@ -313,12 +444,11 @@ class BinPlotterApp:
             ax.xaxis.set_major_locator(locator)
             ax.xaxis.set_major_formatter(formatter)
             ax.tick_params(axis='x', rotation=45)
-
             ax.grid(which='major', linestyle='-', linewidth=0.7)
             ax.grid(which='minor', linestyle=':', linewidth=0.5)
             ax.minorticks_on()
 
-            # Maximize window
+            # Maximize plot window
             figManager = plt.get_current_fig_manager()
             try:
                 figManager.window.state('zoomed')
@@ -329,29 +459,31 @@ class BinPlotterApp:
                     pass
 
             def onselect(xmin, xmax):
-                # Convert time back to epoch seconds
-                t0 = mdates.date2num(xmin)
-                t1 = mdates.date2num(xmax)
-                mask = (mdates.date2num(times_dt) >= t0) & (mdates.date2num(times_dt) <= t1)
+                t0 = xmin  # xmin is already in epoch seconds
+                t1 = xmax  # xmax is already in epoch seconds
+                mask = (times_to_plot >= t0) & (times_to_plot <= t1)
+                selected_values = np.array(values_to_plot)[mask]
 
-                selected_values = values_to_plot[mask]
                 if len(selected_values) == 0:
                     return
 
-                # Compute and plot FFT
                 N = len(selected_values)
-                T = 1.0 / 2000  # default sample rate; could be dynamic from block
+                T = 1.0 / 2000  # Replace with actual sample rate if needed
                 yf = np.fft.rfft(selected_values)
                 xf = np.fft.rfftfreq(N, T)
 
-                plt.figure(figsize=(10, 4))
-                plt.plot(xf, 20 * np.log10(np.abs(yf) + 1e-12))  # dB scale
-                plt.title("Spectrum of Selected Region")
-                plt.xlabel("Frequency (Hz)")
-                plt.ylabel("Magnitude (dB)")
-                plt.grid(True, which='both')
+                # Show spectrum in a new figure
+                fig_spec = plt.figure(figsize=(10, 4))
+                ax_spec = fig_spec.add_subplot(111)
+                ax_spec.plot(xf, 20 * np.log10(np.abs(yf) + 1e-12))
+                ax_spec.set_title("Spectrum of Selected Region")
+                ax_spec.set_xlabel("Frequency (Hz)")
+                ax_spec.set_ylabel("Magnitude (dB)")
+                ax_spec.grid(True)
                 plt.tight_layout()
                 plt.show()
+
+
 
             span = SpanSelector(ax, onselect, 'horizontal', useblit=True,
                                 props=dict(alpha=0.5, facecolor='red'), interactive=True)
