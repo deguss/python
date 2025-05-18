@@ -168,35 +168,21 @@ class BinPlotterApp:
     def inspect_variables(self):
         # Check and display the actual variables and their names
         if hasattr(self, 'times') and self.times is not None:
-            print(f"times: shape={self.times.shape}, dtype={self.times.dtype}")
+            print(f"app.times: shape={self.times.shape}, dtype={self.times.dtype}")
         else:
             print("times: None")
 
         if hasattr(self, 'values') and self.values is not None:
-            print(f"values: shape={self.values.shape}, dtype={self.values.dtype}")
+            print(f"app.values: shape={self.values.shape}, dtype={self.values.dtype}")
         else:
             print("values: None")
 
         if hasattr(self, 'meta') and isinstance(self.meta, dict):
-            print("meta keys:", list(self.meta.keys()))
+            print("app.meta keys:", list(self.meta.keys()))
         else:
             print("meta: None or invalid")
 
-        if hasattr(self, 'sps') and self.sps is not None:
-            print(f"sps: {self.sps}")
-        else:
-            print("sps: None")
-
-        if hasattr(self, 'gain') and self.gain is not None:
-            print(f"gain: {self.gain}")
-        else:
-            print("gain: None")
-        
-        # Add any other relevant variables you need to display
-        if hasattr(self, 'start_day') and self.start_day is not None:
-            print(f"start_day: {self.start_day}")
-        if hasattr(self, 'start_time') and self.start_time is not None:
-            print(f"start_time: {self.start_time}")
+        print("ctrl+D to exit")
 
         # Once variables are printed, give control back to the user in an interactive shell
         # code.interact(local=locals())
