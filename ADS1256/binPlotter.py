@@ -70,6 +70,12 @@ class BinPlotterApp:
         self.info_text.insert(tk.END, content + "\n")
         self.info_text.config(state='disabled')
 
+    def append_info_text(self, content):
+        self.info_text.config(state='normal')
+        self.info_text.insert(tk.END, "==================== \n" + content + "\n")
+        self.info_text.config(state='disabled')
+        
+
     def abort(self):
         self.abort_flag = True
         self.status_label.config(text="Abort requested...")
@@ -154,10 +160,9 @@ class BinPlotterApp:
         return log_info
 
     def epoch_to_datetime(self, epochtime):
-        """Convert epoch time (seconds since 1981-08-26 00:00:27 UTC) to datetime object."""
-        #start_date = datetime(1981, 8, 26, 0, 0, 27, tzinfo=timezone.utc)  # Base start date
+        """Convert epoch time (seconds since 1970-01-01 00:00:00 UTC) to datetime object."""
         start_date = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)  # Base start date
-        return start_date + timedelta(seconds=epochtime)
+        return start_date + timedelta(seconds = epochtime - 27 ) #leap seconds until 2025 (see encoding for MCU)
 
     def inspect_variables(self):
         # Check and display the actual variables and their names
@@ -227,21 +232,6 @@ class BinPlotterApp:
 
         try:
             with open(self.filename, 'rb') as f:
-                # Read first header for metadata
-                header = f.read(HEADER_SIZE)
-                if len(header) != HEADER_SIZE:
-                    raise ValueError("File too short or corrupted")
-                length, sps, epochtime, gain, channel, res16 = struct.unpack(FIXED_FORMAT_STR, header)
-
-                # Compute and store start time
-                corrected_epoch = epochtime - length / sps
-                dt_start = self.epoch_to_datetime(corrected_epoch)
-                self.start_day = dt_start.strftime('%Y-%m-%d')
-                self.start_time = dt_start.strftime('%H:%M')
-
-                start_time = epochtime  # First block's epochtime for initial time reference
-
-                f.seek(0)  # Go back to start for full read
 
                 total_duration = 0  # Track total duration
 
@@ -279,14 +269,14 @@ class BinPlotterApp:
                         total_duration += elapsed_time
 
                         # Check if current epochtime is close to the expected one
-                        drift = abs(epochtime - (start_time + total_duration))
+                        drift = abs(epochtime - (self.meta['epochtime'] + total_duration))
 
                         if drift > 2:  # 2 seconds threshold for drift
                             self.status_label.config(text=f"Time drift detected in block {block_counter}")
-                            self.set_info_text(f"Drift detected at block {block_counter}:\n"
-                                               f"Expected epochtime: {start_time + total_duration:.2f}\n"
-                                               f"Actual epochtime: {epochtime}\n"
-                                               f"Drift: {drift:.2f} seconds")
+                            self.append_info_text(f"Drift detected at block {block_counter}:\n"
+                                                  f"Expected epochtime: {self.meta['epochtime'] + total_duration:.2f}\n"
+                                                  f"Actual epochtime: {epochtime}\n"
+                                                  f"Drift: {drift:.2f} seconds")
                             self.abort_flag = True
                             self.abort_button.config(state='normal')
                             break
@@ -314,15 +304,15 @@ class BinPlotterApp:
                     last_block_epoch = last_block['epochtime']
 
                     # Display difference between expected and actual end times
-                    calculated_end_time = start_time + calculated_total_seconds
+                    calculated_end_time = self.meta['epochtime'] + calculated_total_seconds
                     drift = last_block_epoch - calculated_end_time
 
-                    self.set_info_text(f"Total blocks: {block_counter}\n"
-                                       f"Start Date: {self.start_day} {self.start_time}\n"
-                                       f"Calculated total duration: {calculated_total_seconds:.2f} seconds\n"
-                                       f"Last block epoch: {last_block_epoch}\n"
-                                       f"Calculated end time: {calculated_end_time}\n"
-                                       f"Time drift from last block: {drift:.2f} seconds")
+                    self.append_info_text(f"Total blocks: {block_counter}\n"
+                                          f"Start: {self.meta['epochtime']}\n"
+                                          f"Calculated total duration: {calculated_total_seconds:.2f} seconds\n"
+                                          f"Last block epoch: {last_block_epoch}\n"
+                                          f"Calculated end time: {calculated_end_time}\n"
+                                          f"Time drift from last block: {drift:.2f} seconds")
                 
                     if abs(drift) > 2:  # If drift exceeds 2 seconds, warn user
                         self.status_label.config(text=f"Warning: Time drift detected: {drift:.2f} seconds")
@@ -334,30 +324,27 @@ class BinPlotterApp:
                 values = []
 
                 # Start time of the first block (in epoch time)
-                start_epoch_time = self.blocks[0]['epochtime']  # Get the epochtime of the first block
+                #start_epoch_time = self.blocks[0]['epochtime']  # Get the epochtime of the first block
 
                 # Correct the start time by converting the epochtime to a proper datetime
-                start_time = datetime.fromtimestamp(start_epoch_time, tz=timezone.utc)  # Convert epoch to UTC datetime (timezone-aware)
-                self.start_day = start_time.strftime('%Y-%m-%d')
-                self.start_time = start_time.strftime('%H:%M')            
+                #start_time = datetime.fromtimestamp(start_epoch_time, tz=timezone.utc)  # Convert epoch to UTC datetime (timezone-aware)
+                #self.start_day = start_time.strftime('%Y-%m-%d')
+                #self.start_time = start_time.strftime('%H:%M')            
 
                 # Variable to keep track of the running total time
-                current_time = start_time
-
-                for blk in self.blocks:
-                    # Time step based on the block's sample rate (sps)
-                    time_step = 1.0 / blk['sps']  # Seconds per sample
-                    blk_time = np.arange(blk['length']) * time_step  # Generate an array of time steps in seconds
-                    blk_time = start_epoch_time + np.arange(blk['length']) / blk['sps']
-                    times.append(blk_time)
+                current_time = self.meta['epochtime']
+                block_duration = self.meta['b_length'] / self.meta['sps']
+                time_step = 1.0 / self.meta['sps']
+                blk_time = np.arange(self.meta['b_length']) * time_step  # Generate an array of time steps in seconds
+                for blk in self.blocks:                    
+                    times.append(current_time + blk_time)
+                    current_time = current_time + block_duration
                     values.append(blk['data'])
 
-                    # Update the current time for the next block
-                    current_time = blk_time[-1] + time_step
 
                 # Concatenate all times and values for the complete data
-                self.times = np.concatenate(times)
-                self.values = np.concatenate(values)
+                self.times = np.concatenate(times)      #will be an array of raw epoch seconds
+                self.values = np.concatenate(values)    #will be an array of AD values
 
                 # Later, update it like this:
                 self.meta.update({
@@ -398,7 +385,7 @@ class BinPlotterApp:
 
             # Parse the start datetime string from meta
             start_str = self.meta.get("start", "Unknown")
-            info = f"Loaded: {npz_path}\nStart: {start_str}"
+            info = f"Loaded: {npz_path}\n"
             if self.meta:
                 info += "\n" + "\n".join([f"{k}: {v}" for k, v in self.meta.items()])
 
@@ -445,12 +432,13 @@ class BinPlotterApp:
                 times_to_plot = times
                 values_to_plot = values
 
-            # Convert relative times to absolute datetime using epoch from first block
-            if not self.blocks:
-                raise ValueError("No block metadata available for epoch correction.")
-
-            epoch_base = self.blocks[0]['epochtime']
-            print(f"First entry in times_to_plot: {times_to_plot[0]} (type: {type(times_to_plot[0])})")
+            # Fallback for epoch_base
+            if self.blocks:
+                epoch_base = self.blocks[0]['epochtime']
+            elif 'epochtime' in self.meta:
+                epoch_base = float(self.meta['epochtime'])
+            else:
+                raise ValueError("Missing 'epochtime' in metadata and no block info available")
 
             start_dt = self.epoch_to_datetime(times_to_plot[0])
             end_dt = self.epoch_to_datetime(times_to_plot[-1])
@@ -459,7 +447,12 @@ class BinPlotterApp:
 
             # Plotting
             fig, ax = plt.subplots(figsize=(12, 6))
-            ax.plot(times_to_plot, values_to_plot, linewidth=0.8)
+            time_datetimes = [datetime.fromtimestamp(epoch, timezone.utc) for epoch in times_to_plot]  #convert from raw epoch seconds to datetime objects
+            ax.plot(time_datetimes, values_to_plot, linewidth=0.8)
+
+            # Optional: Set limits if needed (you can use start_dt and end_dt here)
+            ax.set_xlim([start_dt, end_dt])
+
             ax.set_title(title_str)
             ax.set_xlabel("Time (UTC)")
             ax.set_ylabel("ADC Value")
@@ -468,7 +461,7 @@ class BinPlotterApp:
             formatter = DateFormatter('%H:%M')
             ax.xaxis.set_major_locator(locator)
             ax.xaxis.set_major_formatter(formatter)
-            ax.tick_params(axis='x', rotation=45)
+            #ax.tick_params(axis='x', rotation=45)
             ax.grid(which='major', linestyle='-', linewidth=0.7)
             ax.grid(which='minor', linestyle=':', linewidth=0.5)
             ax.minorticks_on()
@@ -484,6 +477,7 @@ class BinPlotterApp:
                     pass
 
             def onselect(xmin, xmax):
+                print(f"Selected range: {xmin} to {xmax}")  # Debugging line
                 t0 = xmin  # xmin is already in epoch seconds
                 t1 = xmax  # xmax is already in epoch seconds
                 mask = (times_to_plot >= t0) & (times_to_plot <= t1)
@@ -517,7 +511,8 @@ class BinPlotterApp:
             plt.show()
 
         except Exception as e:
-            messagebox.showerror("Plotting Error", f"Error during plotting: {e}")
+            tb = traceback.format_exc()
+            messagebox.showerror("Plotting Error", f"Error: {e}\n\n{tb}")
 
 
 if __name__ == "__main__":
