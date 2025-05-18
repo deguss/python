@@ -9,6 +9,7 @@ plt.rcParams['agg.path.chunksize'] = 10000  # Increase the chunksize to 10,000
 import matplotlib.dates as mdates
 from matplotlib.dates import AutoDateLocator, DateFormatter
 from matplotlib.widgets import SpanSelector
+from matplotlib.dates import num2date
 from datetime import timedelta, datetime, timezone
 import code # for interactive shell
 import traceback
@@ -447,7 +448,7 @@ class BinPlotterApp:
 
             # Plotting
             fig, ax = plt.subplots(figsize=(12, 6))
-            time_datetimes = [datetime.fromtimestamp(epoch, timezone.utc) for epoch in times_to_plot]  #convert from raw epoch seconds to datetime objects
+            time_datetimes = [datetime.fromtimestamp(epoch, timezone.utc) for epoch in times_to_plot]  # convert from raw epoch seconds to datetime objects
             ax.plot(time_datetimes, values_to_plot, linewidth=0.8)
 
             # Optional: Set limits if needed (you can use start_dt and end_dt here)
@@ -461,7 +462,6 @@ class BinPlotterApp:
             formatter = DateFormatter('%H:%M')
             ax.xaxis.set_major_locator(locator)
             ax.xaxis.set_major_formatter(formatter)
-            #ax.tick_params(axis='x', rotation=45)
             ax.grid(which='major', linestyle='-', linewidth=0.7)
             ax.grid(which='minor', linestyle=':', linewidth=0.5)
             ax.minorticks_on()
@@ -476,16 +476,28 @@ class BinPlotterApp:
                 except AttributeError:
                     pass
 
+            # Handle selection
             def onselect(xmin, xmax):
-                print(f"Selected range: {xmin} to {xmax}")  # Debugging line
-                t0 = xmin  # xmin is already in epoch seconds
-                t1 = xmax  # xmax is already in epoch seconds
-                mask = (times_to_plot >= t0) & (times_to_plot <= t1)
+                # Convert to datetime for better understanding
+                t0 = num2date(xmin).astimezone(timezone.utc)
+                t1 = num2date(xmax).astimezone(timezone.utc)
+                delta = (t1 - t0).total_seconds()
+
+                print(f"Selected range (datetime): {t0} to {t1}")
+                print(f"Selected range in seconds: {delta:.3f} seconds")
+
+                # Convert datetime back to epoch time for comparison with times_to_plot
+                t0_epoch = t0.timestamp()
+                t1_epoch = t1.timestamp()
+
+                # Mask data within selected range
+                mask = (times_to_plot >= t0_epoch) & (times_to_plot <= t1_epoch)
                 selected_values = np.array(values_to_plot)[mask]
 
                 if len(selected_values) == 0:
                     return
 
+                # Perform FFT on selected range
                 N = len(selected_values)
                 T = 1.0 / 2000  # Replace with actual sample rate if needed
                 yf = np.fft.rfft(selected_values)
@@ -502,8 +514,7 @@ class BinPlotterApp:
                 plt.tight_layout()
                 plt.show()
 
-
-
+            # Create SpanSelector for horizontal selection
             span = SpanSelector(ax, onselect, 'horizontal', useblit=True,
                                 props=dict(alpha=0.5, facecolor='red'), interactive=True)
 
