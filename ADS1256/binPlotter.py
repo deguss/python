@@ -251,6 +251,35 @@ class BinPlotterApp:
             f"- Approximate clock error: {drift_per_hour:.2f} seconds/hour ≈ {100 * drift_per_hour / 3600:.3f}% ({ppm_error:.0f} ppm)"
         )
 
+    def prompt_decimation(self, sps):
+        from tkinter.simpledialog import askstring
+        from tkinter import simpledialog
+
+        # Nyquist values (sps / 2 / 2^n)
+        max_power = 10  # 2^10 = 1024
+        options = []
+        for n in range(max_power + 1):  # 0 to 10
+            factor = 2 ** n
+            f_nyquist = (sps / 2) / factor
+            options.append((factor, f"{f_nyquist:.2f} Hz"))
+
+        # Create a simple option list for user selection
+        choice = simpledialog.askstring(
+            "Choose Nyquist Frequency",
+            "Select desired Nyquist frequency:\n\n" +
+            "\n".join([f"{i+1}: {label}" for i, (_, label) in enumerate(options)]),
+            parent=self.master
+        )
+
+        if choice is None:
+            return None
+
+        try:
+            idx = int(choice.strip()) - 1
+            return options[idx][0]  # Return decimation factor
+        except Exception:
+            messagebox.showerror("Invalid Input", "Please enter a valid option number.")
+            return None
 
     def read_blocks_thread(self):
         import time
@@ -260,9 +289,10 @@ class BinPlotterApp:
         total_drift = 0
         total_duration = 0
         location_last_drift = 0
-        times = []
-        values = []
-        drift_log = []
+        times = []  # Stores time points for each block (epoch seconds)
+        values = []  # Stores the sensor data values
+        drift_log = []  # Logs detected drifts
+        gaps = []  # Logs gaps (time offsets)
 
         self.status_label.config(text="Reading file...")
         self.progress.config(maximum=filesize)
@@ -270,10 +300,10 @@ class BinPlotterApp:
 
         try:
             with open(self.filename, 'rb') as f:
+                # Calculate block duration and time step only once before the loop
                 block_duration = self.meta['b_length'] / self.meta['sps']
                 time_step = 1.0 / self.meta['sps']
                 blk_time = np.arange(self.meta['b_length']) * time_step
-                current_time = self.meta['epochtime']
                 
                 while not self.abort_flag:
                     header = f.read(HEADER_SIZE)
@@ -290,111 +320,118 @@ class BinPlotterApp:
 
                     if len(data) != length:
                         break
-                    
+
                     block_counter += 1
                     if block_counter > 1:  # dismiss first block
-                        values.append(data.astype(np.float32))  # Always store as float for NaN safety
-                        # Generate time base directly here
-                        blk_times = current_time + blk_time
-                        times.append(blk_times)
+                        # Append block data (convert to float to avoid NaN issues later)
+                        values.append(data.astype(np.float32))
 
                         # Check for time consistency and drift after every block
-                        # Calculate expected time for this block based on previous
-                        elapsed_time = length / sps  # Time duration of this block
-                        total_duration += elapsed_time
+                        total_duration += block_duration
 
-                        # Check if current epochtime is close to the expected one
                         expected_time = self.meta['epochtime'] + total_duration + total_drift
-                        # drift = actual time - expected
-                        drift = epochtime - expected_time   # +ve: data late; -ve: data early
+                        blk_times = expected_time + blk_time
+                        times.append(blk_times)
+                        
+                        drift = epochtime - expected_time  # +ve: data late; -ve: data early
 
                         if 2 < abs(drift) < 60:
                             td = datetime.fromtimestamp(expected_time, tz=timezone.utc)
                             self.append_info_text(f"Drift of {drift:.2f}s detected at block {block_counter:8d} at {td.strftime('%H:%M:%S')}\n"
                                 f"after {total_duration:.2f}s absolute or {(total_duration-location_last_drift):.2f}s relative to previous, "\
-                                f"total_drift: {(total_drift+drift):.2f}s\n"
+                                f"total_drift: {(total_drift):.2f}s\n"
                                 f"length={length}, sps={sps}, date(epochtime)={datetime.fromtimestamp(epochtime, tz=timezone.utc).strftime('%H:%M:%S')}")
                             location_last_drift = total_duration
-                            drift_log.append({
-                                'block': block_counter,
-                                'drift': drift,
-                                'time': total_duration  # seconds since start
-                            })                            
-                            # Only insert padding for positive drift (i.e. missing time)
+                            drift_log.append({'block': block_counter, 'drift': drift,'time': total_duration})
+
                             if drift > 0:
-                                num_pad_samples = int(drift * sps)
-                                times.append(np.full(num_pad_samples, np.nan))
-                                values.append(np.full(num_pad_samples, np.nan, dtype=np.float32))
+                                # Log the gap, no padding inserted here
+                                gap_duration = drift
+                                gaps.append({'block': block_counter, 'gap_duration': gap_duration})
+                                total_drift += drift  # Increment the drift
 
-                                total_drift += drift                                
-                                #self.append_info_text(f"After padding, total_drift is now: {total_drift:.2f}s")
-                                
-                            elif drift < 0:
-                                # Negative drift = lagging timestamp; accept it, realign time base
-                                # No padding needed, but expected_time must be reset
-                                total_duration = epochtime - self.meta['epochtime']  # Realign expected time                                
-                                #self.append_info_text(f"Realigning time base: total_duration set to {total_duration:.2f}s")
-
-                        if total_drift < 0:
-                            self.append_info_text(f"Warning: total_drift is negative, which shouldn't happen.")
-                            total_drift = 0  # Ensure total_drift is non-negative
+                        elif drift < 0:
+                            # Negative drift = lagging timestamp; accept it, realign time base
+                            total_duration = epochtime - self.meta['epochtime']  # Realign expected time
+                            total_drift += drift  # Increment the drift
                             
-                        elif abs(drift) >= 60:
+                        if abs(drift) >= 60:
                             td = datetime.fromtimestamp(expected_time, tz=timezone.utc)
                             self.append_info_text(f"Excessive drift ({drift:.2f} sec) at block {block_counter} (at {td.strftime('%H:%M:%S')} after {total_duration:.2f}s). Aborting.")
                             self.abort_flag = True
                             break
 
+                        # Update progress bar periodically
                         if block_counter % 10 == 0 or read_bytes >= filesize:
                             now = time.time()
-                            if now - last_update_time > 1 or read_bytes % (1024 * 1024) < HEADER_SIZE:                            
+                            if now - last_update_time > 1 or read_bytes % (1024 * 1024) < HEADER_SIZE:
                                 self.progress["value"] = read_bytes
                                 self.master.update_idletasks()
                                 self.status_label.config(text=f"Loaded {read_bytes // 1024} KB")
                                 last_update_time = now
 
-                if self.abort_flag:
-                    self.status_label.config(text="Loading aborted due to time drift.")
-                    self.abort_button.config(state='disabled')
-                    return
-
-                self.status_label.config(text=f"Done. Loaded {block_counter} blocks. Wait for saving!")
+            if self.abort_flag:
+                self.status_label.config(text="Loading aborted due to time drift.")
                 self.abort_button.config(state='disabled')
+                return
 
-                self.summarize_drift(drift_log, total_duration)                
+            # Update status label
+            self.status_label.config(text=f"Done. Loaded {block_counter} blocks. Wait for saving!")
+            self.abort_button.config(state='disabled')
 
-                # Concatenate all times and values for the complete data
-                self.times = np.concatenate(times).astype(np.float64)      #will be an array of raw epoch seconds
-                self.values = np.concatenate(values).astype(np.float32)    #will be an array of AD values
+            # Concatenate all times and values for the complete data (without any NaNs)
+            self.times = np.concatenate(times).astype(np.float64)  # Array of epoch seconds
+            self.values = np.concatenate(values).astype(np.float32)  # Array of sensor values (float)
 
-                # Later, update it like this:
-                self.meta.update({
-                    'num_samples': int(self.values.size),
-                    'blocks_loaded': block_counter,
-                    'final_drift_sec': round(total_drift, 3)                    
-                })
-                
+            # Store metadata information
+            self.meta.update({
+                'num_samples': int(self.values.size),
+                'blocks_loaded': block_counter,
+                'final_drift_sec': round(total_drift, 3),
+                'gaps': gaps  # Store gap data
+            })
 
-                self.progress.config(maximum=100)
-                self.progress["value"] = 0
-                self.master.update_idletasks()                
-                
-                base_path = os.path.splitext(self.filename)[0]
-                times_path = f"{base_path}_times.dat"
-                values_path = f"{base_path}_values.dat"
-                meta_path = f"{base_path}.npz"
+            self.summarize_drift(drift_log, total_duration) 
 
-                self.write_memmap_array(times_path, self.times, np.float64)
-                self.write_memmap_array(values_path, self.values, np.int32)
+            self.progress.config(maximum=100)
+            self.progress["value"] = 0
+            self.master.update_idletasks()
 
-                np.savez(meta_path, meta=self.meta)
+            # Estimate the total number of chunks (for the progress bar)
+            total_chunks = 2  # Times + Values
+            chunk_size_times = self.times.nbytes
+            chunk_size_values = self.values.nbytes
+            total_size = chunk_size_times + chunk_size_values
 
-                self.status_label.config(text=f"Saved memory-mapped files.\nMeta: {meta_path}")
-                print(f"Saved memory-mapped files: {times_path}, {values_path}, {meta_path}")
+            # Update progress bar as we write the chunks
+            self.status_label.config(text="Saving data...")
 
-                self.plot_button.config(state='normal')
-                self.progress["value"] = 100
-                self.master.update_idletasks()  
+            # Write times array
+            base_path = os.path.splitext(self.filename)[0]
+            times_path = f"{base_path}_times.dat"
+            values_path = f"{base_path}_values.dat"
+            meta_path = f"{base_path}.npz"
+            
+            self.write_memmap_array(times_path, self.times, np.float64)
+            self.progress["value"] += (chunk_size_times / total_size) * 100
+            self.master.update_idletasks()
+
+            # Write values array
+            self.write_memmap_array(values_path, self.values, np.float32)
+            self.progress["value"] += (chunk_size_values / total_size) * 100
+            self.master.update_idletasks()
+
+            # Save metadata
+            np.savez(meta_path, meta=self.meta)
+            self.progress["value"] = 100  # Final progress update
+            self.master.update_idletasks()
+
+            self.status_label.config(text=f"Saved memory-mapped files.\nMeta: {meta_path}")
+            print(f"Saved memory-mapped files: {times_path}, {values_path}, {meta_path}")
+
+            self.plot_button.config(state='normal')
+            self.progress["value"] = 100
+            self.master.update_idletasks()
 
         except Exception as e:
             tb = traceback.format_exc()
@@ -446,12 +483,12 @@ class BinPlotterApp:
  
 
     def plot_data(self):
+        from scipy.signal import decimate
         if self.times is None or self.values is None:
             messagebox.showinfo("Info", "No data loaded.")
             return
 
-        try:
-            # Downsampling
+        try:   # Downsampling
             MAX_POINTS = 10000
             times = self.times
             values = self.values
@@ -461,19 +498,29 @@ class BinPlotterApp:
 
             if len(times) > MAX_POINTS:
                 step = len(times) // MAX_POINTS
-                times_to_plot = times[::step]
-                values_to_plot = values[::step]
+
+                # Estimate downsampling factor and ensure it's a power of 2 for decimate
+                factor = 2 ** int(np.log2(step))  # round down to nearest power of 2
+
+                # Handle NaNs before filtering (decimate cannot handle NaNs)
+                nan_mask = np.isnan(values)
+                if np.any(nan_mask):
+                    # Temporarily interpolate NaNs (can be skipped or improved)
+                    x = np.arange(len(values))
+                    valid = ~nan_mask
+                    values_filled = np.interp(x, x[valid], values[valid])
+                else:
+                    values_filled = values
+
+                # Apply decimation (filter + downsample)
+                values_to_plot = decimate(values_filled, factor, ftype='fir', zero_phase=True)
+                times_to_plot = times[::factor]
+                values_to_plot = values_to_plot[:len(times_to_plot)]  # match lengths
             else:
                 times_to_plot = times
                 values_to_plot = values
-
-            # Fallback for epoch_base
-            if self.blocks:
-                epoch_base = self.blocks[0]['epochtime']
-            elif 'epochtime' in self.meta:
-                epoch_base = float(self.meta['epochtime'])
-            else:
-                raise ValueError("Missing 'epochtime' in metadata and no block info available")
+                
+            epoch_base = float(self.meta['epochtime'])
 
             start_dt = self.epoch_to_datetime(times_to_plot[0])
             end_dt = self.epoch_to_datetime(times_to_plot[-1])
@@ -516,9 +563,7 @@ class BinPlotterApp:
                 t0 = num2date(xmin).astimezone(timezone.utc)
                 t1 = num2date(xmax).astimezone(timezone.utc)
                 delta = (t1 - t0).total_seconds()
-
-                print(f"Selected range (datetime): {t0} to {t1}")
-                print(f"Selected range in seconds: {delta:.3f} seconds")
+                print(f"Selected range: {delta:.0f}s")
 
                 # Convert datetime back to epoch time for comparison with times_to_plot
                 t0_epoch = t0.timestamp()
@@ -531,27 +576,26 @@ class BinPlotterApp:
                 if len(selected_values) == 0:
                     return
 
-                # Handle NaNs by interpolation or replacement
-                if np.isnan(selected_values).any():
-                    # Use interpolation or zero-fill
-                    try:
-                        # Linear interpolate over NaNs
-                        x = np.arange(len(selected_values))
-                        valid = ~np.isnan(selected_values)
-                        interpolated = np.interp(x, x[valid], selected_values[valid])
-                        selected_values = interpolated
-                    except:
-                        # Fallback to zero fill
-                        selected_values = np.nan_to_num(selected_values, nan=0.0)                
+                # Prompt for decimation (Nyquist frequency) from the user
+                decimation_factor = self.prompt_decimation(self.meta['sps'])
+                if decimation_factor is None:
+                    return  # User cancelled or invalid input
 
-                # Perform FFT on selected range
-                N = len(selected_values)
-                T = 1.0 / 2000  # Replace with actual sample rate if needed
-                yf = np.fft.rfft(selected_values)
-                xf = np.fft.rfftfreq(N, T)
+                # Calculate Nyquist frequency based on decimation factor
+                nyquist_frequency = self.meta['sps'] / 2 / decimation_factor
+                print(f"Nyquist frequency: {nyquist_frequency:.2f} Hz")
+
+                resampled_values = decimate(selected_values, decimation_factor, ftype='fir', zero_phase=True)
+
+                # Perform FFT on resampled data
+                N = len(resampled_values)
+                T = 1 / self.meta['sps']  # Use the actual sample rate (sps)
+                yf = np.fft.rfft(resampled_values)
+                xf = np.fft.rfftfreq(N, T * decimation_factor)  # Adjust the frequency bins accordingly
+
 
                 # Show spectrum in a new figure
-                fig_spec = plt.figure(figsize=(10, 4))
+                fig_spec = plt.figure(figsize=(12, 6))
                 ax_spec = fig_spec.add_subplot(111)
                 ax_spec.plot(xf, 20 * np.log10(np.abs(yf) + 1e-12))
                 ax_spec.set_title("Spectrum of Selected Region")
