@@ -148,6 +148,22 @@ class BinPlotterApp:
         # Start threaded loading
         threading.Thread(target=self.read_blocks_thread).start()
 
+    def write_memmap_array(self, path, array, dtype=None):
+        """Write data to disk using memory-mapped file using np.memmap, with error tracing."""
+        try:
+            if dtype is None:
+                raise ValueError("dtype must be specified")
+
+            m = np.memmap(path, dtype=dtype, mode='w+', shape=array.shape)
+            m[:] = array[:]
+            m.flush()
+            del m  # Ensure file handle is released
+
+        except Exception as e:
+            print(f"Error while writing memmap array to {path}: {e}")
+            import pdb; pdb.set_trace()
+            raise  # Re-raise the exception after debugging     
+
     def read_log_file(self, log_filename):
         log_info = {}
         try:
@@ -161,7 +177,7 @@ class BinPlotterApp:
         return log_info
 
     def epoch_to_datetime(self, epochtime):
-        """Convert epoch time (seconds since 1970-01-01 00:00:00 UTC) to datetime object."""
+        #Convert epoch time (seconds since 1970-01-01 00:00:00 UTC) to datetime object.
         start_date = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)  # Base start date
         return start_date + timedelta(seconds = epochtime - 27 ) #leap seconds until 2025 (see encoding for MCU)
 
@@ -204,6 +220,37 @@ class BinPlotterApp:
         except Exception as e:
             messagebox.showerror("Save Error", f"Could not save file:\n{e}")
 
+    def summarize_drift(self, drift_log, total_duration_sec):
+        if not drift_log:
+            self.append_info_text("No drift detected.")
+            return
+
+        # Unpack
+        drift_sizes = [entry['drift'] for entry in drift_log]
+        drift_times = [entry['time'] for entry in drift_log]  # seconds since start
+
+        # Calculate stats
+        drift_intervals = np.diff(drift_times)
+        drift_avg = np.mean(drift_sizes)
+        drift_min = np.min(drift_sizes)
+        drift_max = np.max(drift_sizes)
+        interval_min = np.min(drift_intervals) / 60
+        interval_max = np.max(drift_intervals) / 60
+        interval_avg = np.mean(drift_intervals) / 60
+        total_drift = np.sum(drift_sizes)
+        duration_hours = total_duration_sec / 3600
+        drift_per_hour = total_drift / duration_hours
+        ppm_error = (drift_per_hour / 3600) * 1e6  # error per second in ppm
+
+        # Format nicely
+        self.append_info_text(
+            "Drift Summary:\n"
+            f"- Detected drift events: {len(drift_sizes)}\n"
+            f"- Drift size: ~{drift_avg:.2f}s (min: {drift_min:.2f}s, max: {drift_max:.2f}s)\n"
+            f"- Occurs approximately every {interval_min:.0f}–{interval_max:.0f} minutes (avg: {interval_avg:.1f} min)\n"
+            f"- Total accumulated drift: ~{total_drift:.2f} seconds over ~{duration_hours:.2f} hours\n"
+            f"- Approximate clock error: {drift_per_hour:.2f} seconds/hour ≈ {100 * drift_per_hour / 3600:.3f}% ({ppm_error:.0f} ppm)"
+        )
 
 
     def read_blocks_thread(self):
@@ -213,16 +260,18 @@ class BinPlotterApp:
         block_counter = 0
         expected_end_epoch = None
         start_time = None
-        current_time = self.meta['epochtime']
+        total_drift = 0
+        total_duration = 0  # Track total duration
+        location_last_drift = 0
+        times = []
+        values = []
+        drift_log = []
 
         self.status_label.config(text="Reading file...")
         self.progress.config(maximum=filesize)
 
         try:
             with open(self.filename, 'rb') as f:
-
-                total_duration = 0  # Track total duration
-
                 while not self.abort_flag:
                     header = f.read(HEADER_SIZE)
                     if len(header) != HEADER_SIZE:
@@ -257,21 +306,51 @@ class BinPlotterApp:
                         total_duration += elapsed_time
 
                         # Check if current epochtime is close to the expected one
-                        drift = abs(epochtime - (self.meta['epochtime'] + total_duration))
+                        expected_time = self.meta['epochtime'] + total_duration + total_drift
+                        # drift = actual time - expected
+                        drift = epochtime - expected_time   # +ve: data late; -ve: data early
 
-                        if 2 < drift < 60:
-                            td = datetime.fromtimestamp(self.meta['epochtime'] + total_duration, tz=timezone.utc)                     
-                            self.append_info_text(f"Drift of {drift:.2f}s detected at block {block_counter} (at {td.strftime('%H:%M:%S')} after {total_duration:.2f}s), filling with NaN")
-                            num_pad_samples = int(drift * sps)
-                            times.append(np.full(num_pad_samples, np.nan))
-                            values.append(np.full(num_pad_samples, np.nan))
-                            current_time += drift
-                        elif drift >= 60:
+                        if 2 < abs(drift) < 60:
+                            td = datetime.fromtimestamp(expected_time, tz=timezone.utc)
+                            self.append_info_text(f"Drift of {drift:.2f}s detected at block {block_counter:8d} at {td.strftime('%H:%M:%S')}\n"
+                                f"after {total_duration:.2f}s absolute or {(total_duration-location_last_drift):.2f}s relative to previous, "\
+                                f"total_drift: {(total_drift+drift):.2f}s\n"
+                                f"length={length}, sps={sps}, date(epochtime)={datetime.fromtimestamp(epochtime, tz=timezone.utc).strftime('%H:%M:%S')}")
+                            location_last_drift = total_duration
+                            drift_log.append({
+                                'block': block_counter,
+                                'drift': drift,
+                                'time': total_duration  # seconds since start
+                            })                            
+                            # Only insert padding for positive drift (i.e. missing time)
+                            if drift > 0:
+                                num_pad_samples = int(drift * sps)
+                                times.append(np.full(num_pad_samples, np.nan))
+                                values.append(np.full(num_pad_samples, np.nan))
+
+                                total_drift += drift                                
+                                #self.append_info_text(f"After padding, total_drift is now: {total_drift:.2f}s")
+                                
+                            elif drift < 0:
+                                # Negative drift = lagging timestamp; accept it, realign time base
+                                # No padding needed, but expected_time must be reset
+                                total_duration = epochtime - self.meta['epochtime']  # Realign expected time                                
+                                #self.append_info_text(f"Realigning time base: total_duration set to {total_duration:.2f}s")
+
+                        if total_drift < 0:
+                            self.append_info_text(f"Warning: total_drift is negative, which shouldn't happen.")
+                            total_drift = 0  # Ensure total_drift is non-negative
+                            
+                        elif abs(drift) >= 60:
+                            td = datetime.fromtimestamp(expected_time, tz=timezone.utc)
                             self.append_info_text(f"Excessive drift ({drift:.2f} sec) at block {block_counter} (at {td.strftime('%H:%M:%S')} after {total_duration:.2f}s). Aborting.")
                             self.abort_flag = True
                             break
-                    
-                        if block_counter % 10 == 0 or read_bytes >= filesize:
+
+                        if block_counter > (30000/125) and epochtime == self.blocks[-240]['epochtime']:
+                            self.append_info_text(f"Repeated timestamp at block {block_counter}, possible data issue.")
+    
+                        if block_counter % 100 == 0 or read_bytes >= filesize:
                             self.progress["value"] = read_bytes
                             self.master.update_idletasks()
                             self.status_label.config(text=f"Loaded {read_bytes // 1024} KB")
@@ -281,45 +360,11 @@ class BinPlotterApp:
                     self.abort_button.config(state='disabled')
                     return
 
-                self.status_label.config(text=f"Done. Loaded {block_counter} blocks.")
+                self.status_label.config(text=f"Done. Loaded {block_counter} blocks. Wait for saving!")
                 self.abort_button.config(state='disabled')
 
-                # Now calculate the final time duration and compare with the last block's epochtime
                 if self.blocks:
-                    # Expected total duration (in seconds)
-                    calculated_total_seconds = total_duration
-
-                    # Get the expected end epochtime from the last block
-                    last_block = self.blocks[-1]
-                    last_block_epoch = last_block['epochtime']
-
-                    # Display difference between expected and actual end times
-                    calculated_end_time = self.meta['epochtime'] + calculated_total_seconds
-                    drift = last_block_epoch - calculated_end_time
-
-                    self.append_info_text(f"Total blocks: {block_counter}\n"
-                                          f"Start: {self.meta['epochtime']}\n"
-                                          f"Calculated total duration: {calculated_total_seconds:.2f} seconds\n"
-                                          f"Last block epoch: {last_block_epoch}\n"
-                                          f"Calculated end time: {calculated_end_time}\n"
-                                          f"Time drift from last block: {drift:.2f} seconds")
-                
-                    if abs(drift) > 2:  # If drift exceeds 2 seconds, warn user
-                        self.status_label.config(text=f"Warning: Time drift detected: {drift:.2f} seconds")
-                    else:
-                        self.status_label.config(text=f"No significant time drift detected.")
-
-                # Convert blocks to arrays for plotting [times] and [values]
-                times = []
-                values = []
-
-                # Start time of the first block (in epoch time)
-                #start_epoch_time = self.blocks[0]['epochtime']  # Get the epochtime of the first block
-
-                # Correct the start time by converting the epochtime to a proper datetime
-                #start_time = datetime.fromtimestamp(start_epoch_time, tz=timezone.utc)  # Convert epoch to UTC datetime (timezone-aware)
-                #self.start_day = start_time.strftime('%Y-%m-%d')
-                #self.start_time = start_time.strftime('%H:%M')            
+                    self.summarize_drift(drift_log, total_duration)                
 
                 # Variable to keep track of the running total time
                 current_time = self.meta['epochtime']
@@ -328,7 +373,7 @@ class BinPlotterApp:
                 blk_time = np.arange(self.meta['b_length']) * time_step  # Generate an array of time steps in seconds
                 for blk in self.blocks:                    
                     times.append(current_time + blk_time)
-                    current_time = current_time + block_duration
+                    current_time += block_duration
                     values.append(blk['data'])
 
 
@@ -340,18 +385,30 @@ class BinPlotterApp:
                 self.meta.update({
                     'num_samples': int(self.values.size),
                     'blocks_loaded': block_counter,
-                    'estimated_end_epoch': round(calculated_end_time, 3),
-                    'final_drift_sec': round(drift, 3)                    
+                    'final_drift_sec': round(total_drift, 3)                    
                 })
                 
-                # Save to npz
-                base = os.path.splitext(os.path.basename(self.filename))[0]
-                npz_path = os.path.join(os.path.dirname(self.filename), f"{base}.npz")
-                np.savez_compressed(npz_path, times=self.times, values=self.values, meta=self.meta)
-                self.status_label.config(text=f"Saved to {npz_path}")
-                print(f"Saved to {npz_path}")
+
+                self.progress.config(maximum=100)
+                self.progress["value"] = 0
+                self.master.update_idletasks()                
+                
+                base_path = os.path.splitext(self.filename)[0]
+                times_path = f"{base_path}_times.dat"
+                values_path = f"{base_path}_values.dat"
+                meta_path = f"{base_path}.npz"
+
+                self.write_memmap_array(times_path, self.times, np.float64)
+                self.write_memmap_array(values_path, self.values, np.int32)
+
+                np.savez(meta_path, meta=self.meta)
+
+                self.status_label.config(text=f"Saved memory-mapped files.\nMeta: {meta_path}")
+                print(f"Saved memory-mapped files: {times_path}, {values_path}, {meta_path}")
 
                 self.plot_button.config(state='normal')
+                self.progress["value"] = 100
+                self.master.update_idletasks()  
 
         except Exception as e:
             tb = traceback.format_exc()
@@ -361,30 +418,32 @@ class BinPlotterApp:
 
 
     def load_npz_file(self):
-        npz_path = filedialog.askopenfilename(title="Select .npz data file", filetypes=[("NPZ Files", "*.npz")])
-        if not npz_path:
+        meta_path = filedialog.askopenfilename(title="Select meta .npz file", filetypes=[("NPZ Files", "*.npz")])
+        if not meta_path:
             return
         try:
-            data = np.load(npz_path, allow_pickle=True)
-            self.times = data['times']
-            self.values = data['values']
+            base = os.path.splitext(meta_path)[0]
+            times_path = f"{base}_times.dat"
+            values_path = f"{base}_values.dat"
 
-            # Properly handle meta stored as 0-d ndarray
-            meta_raw = data['meta']
-            self.meta = meta_raw.item() if isinstance(meta_raw, np.ndarray) else dict(meta_raw)
+            if not os.path.exists(times_path) or not os.path.exists(values_path):
+                raise FileNotFoundError("Associated .dat files for times or values not found.")
 
-            # Parse the start datetime string from meta
-            start_str = self.meta.get("start", "Unknown")
-            info = f"Loaded: {npz_path}\n"
-            if self.meta:
-                info += "\n" + "\n".join([f"{k}: {v}" for k, v in self.meta.items()])
+            self.meta = np.load(meta_path, allow_pickle=True)['meta'].item()
 
+            self.times = np.memmap(times_path, dtype=np.float64, mode='r')
+            self.values = np.memmap(values_path, dtype=np.int32, mode='r')
+
+            info = f"Loaded memory-mapped files:\n{meta_path}\n{times_path}\n{values_path}\n\n"
+            info += "\n".join(f"{k}: {v}" for k, v in self.meta.items())
             self.set_info_text(info)
+
             self.plot_button.config(state='normal')
 
         except Exception as e:
-            self.set_info_text(f"Failed to load .npz: {e}")
+            self.set_info_text(f"Failed to load memory-mapped files: {e}")
             self.plot_button.config(state='disabled')
+
 
 
     def read_log_file(self, log_filename):
