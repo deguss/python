@@ -22,7 +22,6 @@ class BinPlotterApp:
         self.master = master
         self.master.title("Binary Data Plotter")
         self.abort_flag = False
-        self.blocks = []
         self.filename = ""
         self.meta = {}
         self.times = None
@@ -254,14 +253,12 @@ class BinPlotterApp:
 
 
     def read_blocks_thread(self):
-        self.blocks = []
+        import time
         filesize = os.path.getsize(self.filename)
         read_bytes = 0
         block_counter = 0
-        expected_end_epoch = None
-        start_time = None
         total_drift = 0
-        total_duration = 0  # Track total duration
+        total_duration = 0
         location_last_drift = 0
         times = []
         values = []
@@ -269,9 +266,15 @@ class BinPlotterApp:
 
         self.status_label.config(text="Reading file...")
         self.progress.config(maximum=filesize)
+        last_update_time = time.time()
 
         try:
             with open(self.filename, 'rb') as f:
+                block_duration = self.meta['b_length'] / self.meta['sps']
+                time_step = 1.0 / self.meta['sps']
+                blk_time = np.arange(self.meta['b_length']) * time_step
+                current_time = self.meta['epochtime']
+                
                 while not self.abort_flag:
                     header = f.read(HEADER_SIZE)
                     if len(header) != HEADER_SIZE:
@@ -287,18 +290,13 @@ class BinPlotterApp:
 
                     if len(data) != length:
                         break
-
+                    
                     block_counter += 1
                     if block_counter > 1:  # dismiss first block
-                        self.blocks.append({
-                            'length': length,
-                            'sps': sps,
-                            'epochtime': epochtime,
-                            'gain': gain,
-                            'channel': channel,
-                            'res16': res16,
-                            'data': data
-                        })
+                        values.append(data.astype(np.float32))  # Always store as float for NaN safety
+                        # Generate time base directly here
+                        blk_times = current_time + blk_time
+                        times.append(blk_times)
 
                         # Check for time consistency and drift after every block
                         # Calculate expected time for this block based on previous
@@ -326,7 +324,7 @@ class BinPlotterApp:
                             if drift > 0:
                                 num_pad_samples = int(drift * sps)
                                 times.append(np.full(num_pad_samples, np.nan))
-                                values.append(np.full(num_pad_samples, np.nan))
+                                values.append(np.full(num_pad_samples, np.nan, dtype=np.float32))
 
                                 total_drift += drift                                
                                 #self.append_info_text(f"After padding, total_drift is now: {total_drift:.2f}s")
@@ -347,13 +345,13 @@ class BinPlotterApp:
                             self.abort_flag = True
                             break
 
-                        if block_counter > (30000/125) and epochtime == self.blocks[-240]['epochtime']:
-                            self.append_info_text(f"Repeated timestamp at block {block_counter}, possible data issue.")
-    
-                        if block_counter % 100 == 0 or read_bytes >= filesize:
-                            self.progress["value"] = read_bytes
-                            self.master.update_idletasks()
-                            self.status_label.config(text=f"Loaded {read_bytes // 1024} KB")
+                        if block_counter % 10 == 0 or read_bytes >= filesize:
+                            now = time.time()
+                            if now - last_update_time > 1 or read_bytes % (1024 * 1024) < HEADER_SIZE:                            
+                                self.progress["value"] = read_bytes
+                                self.master.update_idletasks()
+                                self.status_label.config(text=f"Loaded {read_bytes // 1024} KB")
+                                last_update_time = now
 
                 if self.abort_flag:
                     self.status_label.config(text="Loading aborted due to time drift.")
@@ -363,23 +361,11 @@ class BinPlotterApp:
                 self.status_label.config(text=f"Done. Loaded {block_counter} blocks. Wait for saving!")
                 self.abort_button.config(state='disabled')
 
-                if self.blocks:
-                    self.summarize_drift(drift_log, total_duration)                
-
-                # Variable to keep track of the running total time
-                current_time = self.meta['epochtime']
-                block_duration = self.meta['b_length'] / self.meta['sps']
-                time_step = 1.0 / self.meta['sps']
-                blk_time = np.arange(self.meta['b_length']) * time_step  # Generate an array of time steps in seconds
-                for blk in self.blocks:                    
-                    times.append(current_time + blk_time)
-                    current_time += block_duration
-                    values.append(blk['data'])
-
+                self.summarize_drift(drift_log, total_duration)                
 
                 # Concatenate all times and values for the complete data
-                self.times = np.concatenate(times)      #will be an array of raw epoch seconds
-                self.values = np.concatenate(values)    #will be an array of AD values
+                self.times = np.concatenate(times).astype(np.float64)      #will be an array of raw epoch seconds
+                self.values = np.concatenate(values).astype(np.float32)    #will be an array of AD values
 
                 # Later, update it like this:
                 self.meta.update({
