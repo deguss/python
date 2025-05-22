@@ -213,6 +213,7 @@ class BinPlotterApp:
         block_counter = 0
         expected_end_epoch = None
         start_time = None
+        current_time = self.meta['epochtime']
 
         self.status_label.config(text="Reading file...")
         self.progress.config(maximum=filesize)
@@ -258,16 +259,18 @@ class BinPlotterApp:
                         # Check if current epochtime is close to the expected one
                         drift = abs(epochtime - (self.meta['epochtime'] + total_duration))
 
-                        if drift > 2:  # 2 seconds threshold for drift
-                            self.status_label.config(text=f"Time drift detected in block {block_counter}")
-                            self.append_info_text(f"Drift detected at block {block_counter}:\n"
-                                                  f"Expected epochtime: {self.meta['epochtime'] + total_duration:.2f}\n"
-                                                  f"Actual epochtime: {epochtime}\n"
-                                                  f"Drift: {drift:.2f} seconds")
+                        if 2 < drift < 60:
+                            td = datetime.fromtimestamp(self.meta['epochtime'] + total_duration, tz=timezone.utc)                     
+                            self.append_info_text(f"Drift of {drift:.2f}s detected at block {block_counter} (at {td.strftime('%H:%M:%S')} after {total_duration:.2f}s), filling with NaN")
+                            num_pad_samples = int(drift * sps)
+                            times.append(np.full(num_pad_samples, np.nan))
+                            values.append(np.full(num_pad_samples, np.nan))
+                            current_time += drift
+                        elif drift >= 60:
+                            self.append_info_text(f"Excessive drift ({drift:.2f} sec) at block {block_counter} (at {td.strftime('%H:%M:%S')} after {total_duration:.2f}s). Aborting.")
                             self.abort_flag = True
-                            self.abort_button.config(state='normal')
                             break
-
+                    
                         if block_counter % 10 == 0 or read_bytes >= filesize:
                             self.progress["value"] = read_bytes
                             self.master.update_idletasks()
@@ -482,6 +485,19 @@ class BinPlotterApp:
 
                 if len(selected_values) == 0:
                     return
+
+                # Handle NaNs by interpolation or replacement
+                if np.isnan(selected_values).any():
+                    # Use interpolation or zero-fill
+                    try:
+                        # Linear interpolate over NaNs
+                        x = np.arange(len(selected_values))
+                        valid = ~np.isnan(selected_values)
+                        interpolated = np.interp(x, x[valid], selected_values[valid])
+                        selected_values = interpolated
+                    except:
+                        # Fallback to zero fill
+                        selected_values = np.nan_to_num(selected_values, nan=0.0)                
 
                 # Perform FFT on selected range
                 N = len(selected_values)
