@@ -8,11 +8,16 @@ import matplotlib.pyplot as plt
 plt.rcParams['agg.path.chunksize'] = 10000  # Increase the chunksize to 10,000
 import matplotlib.dates as mdates
 from matplotlib.dates import AutoDateLocator, DateFormatter
-from matplotlib.widgets import SpanSelector
+from matplotlib.widgets import SpanSelector, CheckButtons
+import matplotlib.gridspec as gridspec
 from matplotlib.dates import num2date
 from datetime import timedelta, datetime, timezone
 import code # for interactive shell
 import traceback
+
+import matplotlib
+matplotlib.use('TkAgg')  # or 'Qt5Agg' depending on your environment
+print("Using backend:", matplotlib.get_backend())
 
 FIXED_FORMAT_STR = '<HHIBBH'
 HEADER_SIZE = struct.calcsize(FIXED_FORMAT_STR)
@@ -252,8 +257,10 @@ class BinPlotterApp:
         )
 
     def prompt_decimation(self, sps):
-        from tkinter.simpledialog import askstring
-        from tkinter import simpledialog
+        import tkinter as tk
+        from tkinter import ttk, messagebox
+
+        result = {"factor": None, "logscale": False}
 
         # Nyquist values (sps / 2 / 2^n)
         max_power = 10  # 2^10 = 1024
@@ -261,25 +268,44 @@ class BinPlotterApp:
         for n in range(max_power + 1):  # 0 to 10
             factor = 2 ** n
             f_nyquist = (sps / 2) / factor
-            options.append((factor, f"{f_nyquist:.2f} Hz"))
+            options.append((factor, f"{factor}× (Nyquist: {f_nyquist:.2f} Hz)"))
 
-        # Create a simple option list for user selection
-        choice = simpledialog.askstring(
-            "Choose Nyquist Frequency",
-            "Select desired Nyquist frequency:\n\n" +
-            "\n".join([f"{i+1}: {label}" for i, (_, label) in enumerate(options)]),
-            parent=self.master
-        )
+        # Custom dialog window
+        dialog = tk.Toplevel(self.master)
+        dialog.title("Select Decimation / Nyquist Frequency")
+        dialog.grab_set()
+        dialog.resizable(False, False)
 
-        if choice is None:
-            return None
+        # Radio buttons for decimation factor
+        tk.Label(dialog, text="Select decimation factor:").pack(pady=(10, 0))
+        selected_idx = tk.IntVar(value=0)
+        for i, (_, label) in enumerate(options):
+            ttk.Radiobutton(dialog, text=label, variable=selected_idx, value=i).pack(anchor="w")
 
-        try:
-            idx = int(choice.strip()) - 1
-            return options[idx][0]  # Return decimation factor
-        except Exception:
-            messagebox.showerror("Invalid Input", "Please enter a valid option number.")
-            return None
+        # Log scale checkbox
+        log_var = tk.BooleanVar()
+        ttk.Checkbutton(dialog, text="Use logarithmic frequency axis", variable=log_var).pack(pady=10, anchor="w")
+
+        # OK/Cancel buttons
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=10)
+
+        def on_ok():
+            idx = selected_idx.get()
+            result["factor"] = options[idx][0]
+            result["logscale"] = log_var.get()
+            dialog.destroy()
+
+        def on_cancel():
+            result["factor"] = None
+            dialog.destroy()
+
+        ttk.Button(button_frame, text="OK", width=10, command=on_ok).pack(side="left", padx=5)
+        ttk.Button(button_frame, text="Cancel", width=10, command=on_cancel).pack(side="right", padx=5)
+
+        self.master.wait_window(dialog)
+
+        return result if result["factor"] is not None else None
 
     def read_blocks_thread(self):
         import time
@@ -483,7 +509,8 @@ class BinPlotterApp:
  
 
     def plot_data(self):
-        from scipy.signal import decimate
+        from scipy.signal import decimate, get_window
+        
         if self.times is None or self.values is None:
             messagebox.showinfo("Info", "No data loaded.")
             return
@@ -563,12 +590,14 @@ class BinPlotterApp:
                 t0 = num2date(xmin).astimezone(timezone.utc)
                 t1 = num2date(xmax).astimezone(timezone.utc)
                 delta = (t1 - t0).total_seconds()
-                print(f"Selected range: {delta:.0f}s")
-
                 # Convert datetime back to epoch time for comparison with times_to_plot
                 t0_epoch = t0.timestamp()
                 t1_epoch = t1.timestamp()
-
+                t0_str = self.epoch_to_datetime(t0_epoch).strftime('%H:%M')
+                t1_str = self.epoch_to_datetime(t1_epoch).strftime('%H:%M')
+                
+                print(f"Selected range {t0_str}-{t1_str} ({delta:.0f}s)")
+                
                 # Mask data within selected range
                 mask = (times_to_plot >= t0_epoch) & (times_to_plot <= t1_epoch)
                 selected_values = np.array(values_to_plot)[mask]
@@ -577,32 +606,60 @@ class BinPlotterApp:
                     return
 
                 # Prompt for decimation (Nyquist frequency) from the user
-                decimation_factor = self.prompt_decimation(self.meta['sps'])
-                if decimation_factor is None:
-                    return  # User cancelled or invalid input
+                resample_config = self.prompt_decimation(self.meta['sps'])
+                if resample_config is None:
+                    return
 
-                # Calculate Nyquist frequency based on decimation factor
+                decimation_factor = resample_config["factor"]
+                use_log_scale = resample_config["logscale"]
+                
+                resampled_rate    = self.meta['sps'] / decimation_factor
                 nyquist_frequency = self.meta['sps'] / 2 / decimation_factor
-                print(f"Nyquist frequency: {nyquist_frequency:.2f} Hz")
+                resampled_values = selected_values
+                if resampled_rate != self.meta['sps']:
+                    print(f"resampled at {resampled_rate:.2f}Hz, Nyquist frequency {nyquist_frequency:.2f}Hz")
+                    resampled_values = decimate(selected_values, decimation_factor, ftype='fir', zero_phase=True)
 
-                resampled_values = decimate(selected_values, decimation_factor, ftype='fir', zero_phase=True)
+                # Subtract mean (DC removal)
+                resampled_values -= np.mean(resampled_values)
+                
+                # Select window function and apply it
+                window = get_window('hann', len(resampled_values))
+                windowed_signal = resampled_values * window
+
 
                 # Perform FFT on resampled data
                 N = len(resampled_values)
                 T = 1 / self.meta['sps']  # Use the actual sample rate (sps)
-                yf = np.fft.rfft(resampled_values)
+                yf = np.fft.rfft(windowed_signal)
                 xf = np.fft.rfftfreq(N, T * decimation_factor)  # Adjust the frequency bins accordingly
 
+                # Compensate for window's RMS (energy loss)
+                correction = np.sqrt(np.mean(window**2))  # RMS of the window
+                yf_corrected = yf / correction                
 
-                # Show spectrum in a new figure
-                fig_spec = plt.figure(figsize=(12, 6))
-                ax_spec = fig_spec.add_subplot(111)
-                ax_spec.plot(xf, 20 * np.log10(np.abs(yf) + 1e-12))
-                ax_spec.set_title("Spectrum of Selected Region")
+                # Convert amplitude to decibels, add floor for cleaner log scaling
+                magnitude = 20 * np.log10(np.abs(yf_corrected))
+                magnitude = np.clip(magnitude, a_min=-120, a_max=None)  # Set floor at -120 dB
+
+                # Create the plot
+                fig_spec, ax_spec = plt.subplots(figsize=(12, 6))
+
+                ax_spec.plot(xf, magnitude, color='navy', linewidth=1.5, label='Amplitude Spectrum')
+                ax_spec.set_title(f"Amplitude spectrum of slot [{t0_str}-{t1_str}] resampled at {resampled_rate:.2f}Hz")
                 ax_spec.set_xlabel("Frequency (Hz)")
                 ax_spec.set_ylabel("Magnitude (dB)")
-                ax_spec.grid(True)
-                plt.tight_layout()
+
+                # Set limits and grid
+                if use_log_scale:
+                    ax_spec.set_xscale('log')
+                    ax_spec.set_xlim([max(1e-1, np.min(xf[xf > 0])), xf[-1]])
+                else:
+                    ax_spec.set_xscale('linear')
+                    ax_spec.set_xlim([0, xf[-1]])                
+                ax_spec.set_ylim([-120, np.max(magnitude) + 5])
+                ax_spec.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
+
                 plt.show()
 
             # Create SpanSelector for horizontal selection
