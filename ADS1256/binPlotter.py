@@ -15,9 +15,6 @@ from datetime import timedelta, datetime, timezone
 import code # for interactive shell
 import traceback
 
-import matplotlib
-matplotlib.use('TkAgg')  # or 'Qt5Agg' depending on your environment
-print("Using backend:", matplotlib.get_backend())
 
 FIXED_FORMAT_STR = '<HHIBBH'
 HEADER_SIZE = struct.calcsize(FIXED_FORMAT_STR)
@@ -260,52 +257,67 @@ class BinPlotterApp:
         import tkinter as tk
         from tkinter import ttk, messagebox
 
-        result = {"factor": None, "logscale": False}
-
-        # Nyquist values (sps / 2 / 2^n)
-        max_power = 10  # 2^10 = 1024
+        # Helper to calculate Nyquist options
+        max_power = 10
         options = []
-        for n in range(max_power + 1):  # 0 to 10
+        for n in range(max_power + 1):
             factor = 2 ** n
             f_nyquist = (sps / 2) / factor
-            options.append((factor, f"{factor}× (Nyquist: {f_nyquist:.2f} Hz)"))
+            options.append((factor, f"{f_nyquist:.2f} Hz"))
 
-        # Custom dialog window
-        dialog = tk.Toplevel(self.master)
-        dialog.title("Select Decimation / Nyquist Frequency")
-        dialog.grab_set()
-        dialog.resizable(False, False)
+        # Custom dialog class
+        class DecimationDialog(tk.Toplevel):
+            def __init__(self, master):
+                super().__init__(master)
+                self.title("FFT Parameters")
+                self.transient(master)
+                self.grab_set()
 
-        # Radio buttons for decimation factor
-        tk.Label(dialog, text="Select decimation factor:").pack(pady=(10, 0))
-        selected_idx = tk.IntVar(value=0)
-        for i, (_, label) in enumerate(options):
-            ttk.Radiobutton(dialog, text=label, variable=selected_idx, value=i).pack(anchor="w")
+                self.factor = tk.IntVar(value=1)
+                self.plot_type = tk.StringVar(value='spectrum')
+                self.use_log = tk.BooleanVar(value=False)
 
-        # Log scale checkbox
-        log_var = tk.BooleanVar()
-        ttk.Checkbutton(dialog, text="Use logarithmic frequency axis", variable=log_var).pack(pady=10, anchor="w")
+                # Nyquist frequency list
+                ttk.Label(self, text="Select Nyquist Frequency:").pack(pady=(10, 0))
+                self.freq_box = ttk.Combobox(self, state="readonly", width=30)
+                self.freq_box['values'] = [label for _, label in options]
+                self.freq_box.current(0)
+                self.freq_box.pack(pady=5)
 
-        # OK/Cancel buttons
-        button_frame = tk.Frame(dialog)
-        button_frame.pack(pady=10)
+                # Radio buttons for plot type
+                ttk.Label(self, text="Plot Type:").pack(pady=(10, 0))
+                for mode in ['spectrum', 'spectrogram']:
+                    ttk.Radiobutton(self, text=mode.capitalize(), variable=self.plot_type, value=mode).pack(anchor='w', padx=20)
 
-        def on_ok():
-            idx = selected_idx.get()
-            result["factor"] = options[idx][0]
-            result["logscale"] = log_var.get()
-            dialog.destroy()
+                # Log scale checkbox
+                ttk.Checkbutton(self, text="Logarithmic Frequency Scale", variable=self.use_log).pack(pady=10)
 
-        def on_cancel():
-            result["factor"] = None
-            dialog.destroy()
+                # Buttons
+                button_frame = ttk.Frame(self)
+                button_frame.pack(pady=10)
+                ttk.Button(button_frame, text="OK", command=self.on_ok).pack(side='left', padx=5)
+                ttk.Button(button_frame, text="Cancel", command=self.on_cancel).pack(side='left', padx=5)
 
-        ttk.Button(button_frame, text="OK", width=10, command=on_ok).pack(side="left", padx=5)
-        ttk.Button(button_frame, text="Cancel", width=10, command=on_cancel).pack(side="right", padx=5)
+                self.result = None
 
+            def on_ok(self):
+                try:
+                    index = self.freq_box.current()
+                    factor = options[index][0]
+                    self.result = (factor, self.plot_type.get(), self.use_log.get())
+                    self.destroy()
+                except Exception:
+                    messagebox.showerror("Error", "Invalid selection.")
+
+            def on_cancel(self):
+                self.destroy()
+
+        # Open dialog and return result
+        dialog = DecimationDialog(self.master)
         self.master.wait_window(dialog)
 
-        return result if result["factor"] is not None else None
+        return dialog.result if dialog.result else (None, None, None)
+
 
     def read_blocks_thread(self):
         import time
@@ -586,6 +598,8 @@ class BinPlotterApp:
 
             # Handle selection
             def onselect(xmin, xmax):
+                from matplotlib.dates import num2date
+                from matplotlib.ticker import LogLocator, FuncFormatter
                 # Convert to datetime for better understanding
                 t0 = num2date(xmin).astimezone(timezone.utc)
                 t1 = num2date(xmax).astimezone(timezone.utc)
@@ -606,12 +620,9 @@ class BinPlotterApp:
                     return
 
                 # Prompt for decimation (Nyquist frequency) from the user
-                resample_config = self.prompt_decimation(self.meta['sps'])
-                if resample_config is None:
+                decimation_factor, mode, use_log = self.prompt_decimation(self.meta['sps'])
+                if decimation_factor is None:
                     return
-
-                decimation_factor = resample_config["factor"]
-                use_log_scale = resample_config["logscale"]
                 
                 resampled_rate    = self.meta['sps'] / decimation_factor
                 nyquist_frequency = self.meta['sps'] / 2 / decimation_factor
@@ -622,44 +633,71 @@ class BinPlotterApp:
 
                 # Subtract mean (DC removal)
                 resampled_values -= np.mean(resampled_values)
-                
-                # Select window function and apply it
-                window = get_window('hann', len(resampled_values))
-                windowed_signal = resampled_values * window
-
-
-                # Perform FFT on resampled data
-                N = len(resampled_values)
-                T = 1 / self.meta['sps']  # Use the actual sample rate (sps)
-                yf = np.fft.rfft(windowed_signal)
-                xf = np.fft.rfftfreq(N, T * decimation_factor)  # Adjust the frequency bins accordingly
-
-                # Compensate for window's RMS (energy loss)
-                correction = np.sqrt(np.mean(window**2))  # RMS of the window
-                yf_corrected = yf / correction                
-
-                # Convert amplitude to decibels, add floor for cleaner log scaling
-                magnitude = 20 * np.log10(np.abs(yf_corrected))
-                magnitude = np.clip(magnitude, a_min=-120, a_max=None)  # Set floor at -120 dB
-
-                # Create the plot
                 fig_spec, ax_spec = plt.subplots(figsize=(12, 6))
 
-                ax_spec.plot(xf, magnitude, color='navy', linewidth=1.5, label='Amplitude Spectrum')
-                ax_spec.set_title(f"Amplitude spectrum of slot [{t0_str}-{t1_str}] resampled at {resampled_rate:.2f}Hz")
-                ax_spec.set_xlabel("Frequency (Hz)")
-                ax_spec.set_ylabel("Magnitude (dB)")
+                if mode == 'spectrum': # Spectrum mode
+                    # Select window function and apply it
+                    window = get_window('hann', len(resampled_values))
+                    windowed_signal = resampled_values * window
 
-                # Set limits and grid
-                if use_log_scale:
-                    ax_spec.set_xscale('log')
-                    ax_spec.set_xlim([max(1e-1, np.min(xf[xf > 0])), xf[-1]])
-                else:
-                    ax_spec.set_xscale('linear')
-                    ax_spec.set_xlim([0, xf[-1]])                
-                ax_spec.set_ylim([-120, np.max(magnitude) + 5])
-                ax_spec.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
 
+                    # Perform FFT on resampled data
+                    N = len(resampled_values)
+                    T = 1 / self.meta['sps']  # Use the actual sample rate (sps)
+                    yf = np.fft.rfft(windowed_signal)
+                    xf = np.fft.rfftfreq(N, T * decimation_factor)  # Adjust the frequency bins accordingly
+
+                    # Compensate for window's RMS (energy loss)
+                    correction = np.sqrt(np.mean(window**2))  # RMS of the window
+                    yf_corrected = yf / correction                
+
+                    # Convert amplitude to decibels, add floor for cleaner log scaling
+                    magnitude = 20 * np.log10(np.abs(yf_corrected))
+                    magnitude = np.clip(magnitude, a_min=-120, a_max=None)  # Set floor at -120 dB
+
+                    ax_spec.plot(xf, magnitude, color='navy', linewidth=1.5, label='Amplitude Spectrum')
+                    ax_spec.set_title(f"Amplitude spectrum of slot [{t0_str}-{t1_str}] resampled at {resampled_rate:.2f}Hz")
+                    ax_spec.set_xlabel("Frequency (Hz)")
+                    ax_spec.set_ylabel("Magnitude (dB)")
+
+                    # Set limits and grid
+                    if use_log:
+                        ax_spec.set_xscale('log')
+                        ax_spec.set_xlim([max(1e-1, np.min(xf[xf > 0])), xf[-1]])
+                    else:
+                        ax_spec.set_xscale('linear')
+                        ax_spec.set_xlim([0, xf[-1]])                
+                    ax_spec.set_ylim([-120, np.max(magnitude) + 5])
+                    ax_spec.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
+
+
+                elif mode == 'spectrogram': # Spectrogram mode (waterfall)                    
+                    ax_spec.specgram(
+                        resampled_values,
+                        NFFT=256,
+                        Fs=resampled_rate,
+                        noverlap=128,
+                        scale='dB',
+                        cmap='viridis',
+                        xextent=(t0_epoch, t1_epoch)
+                    )
+
+                    # Convert bin centers (in seconds) to epoch time
+                    #bin_times_epoch = t0_epoch + bins  # bins are relative to 0s
+
+                    # Replace x-axis ticks with datetime labels
+                    #ax_spec.set_xticks(bin_times_epoch)
+
+                    # Format time axis from epoch to datetime
+                    def format_time(x, pos=None):
+                        return self.epoch_to_datetime(x).strftime('%H:%M')
+                    ax_spec.xaxis.set_major_formatter(FuncFormatter(format_time))
+
+                    ax_spec.set_title(f"Spectrogram [{t0_str}-{t1_str}] @ {resampled_rate:.2f} Hz")
+                    ax_spec.set_xlabel("Time (UTC)")
+                    ax_spec.set_ylabel("Frequency (Hz)")                 
+
+                plt.tight_layout()
                 plt.show()
 
             # Create SpanSelector for horizontal selection
