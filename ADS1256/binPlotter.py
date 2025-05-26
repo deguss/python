@@ -672,7 +672,7 @@ class BinPlotterApp:
 
 
                 elif mode == 'spectrogram': # Spectrogram mode (waterfall)                    
-                    ax_spec.specgram(
+                    Pxx, freqs, bins, im = ax_spec.specgram(
                         resampled_values,
                         NFFT=256,
                         Fs=resampled_rate,
@@ -695,7 +695,11 @@ class BinPlotterApp:
 
                     ax_spec.set_title(f"Spectrogram [{t0_str}-{t1_str}] @ {resampled_rate:.2f} Hz")
                     ax_spec.set_xlabel("Time (UTC)")
-                    ax_spec.set_ylabel("Frequency (Hz)")                 
+                    ax_spec.set_ylabel("Frequency (Hz)")
+
+                    # Add colorbar
+                    cbar = plt.colorbar(im, ax=ax_spec)
+                    cbar.set_label('Magnitude (dB)')                 
 
                 plt.tight_layout()
                 plt.show()
