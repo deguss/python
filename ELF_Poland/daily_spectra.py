@@ -36,7 +36,7 @@ from Calibrate_HYL import calibrate_hyl
 
 # ---- Input / output ---------------------------------------------------------
 DATA_ROOT   = 'test_backyard'   # folder containing the YYYYMMDD directories
-OUTPUT_DIR  = SCRIPT_DIR        # where the PNGs are saved
+OUTPUT_DIR  = DATA_ROOT        # where the PNGs are saved
 DAYS        = None              # None = all days found, or e.g. ['20261024', '20261025']
 SKIP_EXISTING = False           # True: skip a day if both PNGs already exist
 
@@ -51,14 +51,18 @@ REMOVE_DC     = True            # the calibrated ADC data has a large offset (mi
 # ---- Filtering (applied to BOTH spectra and time series) --------------------
 # Filter state is carried over between consecutive files (no edge transients
 # at the 5-minute boundaries); it is reset after a gap in the data.
-HP_ENABLE        = True         # high-pass (removes drift / residual DC)
-HP_CUTOFF_HZ     = 0.5          # [Hz]
-HP_ORDER         = 2            # Butterworth order
+HP_ENABLE        = False         # high-pass (removes drift / residual DC)
+#HP_CUTOFF_HZ     = 0.5          # [Hz]
+#HP_ORDER         = 2            # Butterworth order
 
-NOTCH_ENABLE     = True         # mains hum removal
-NOTCH_FREQ_HZ    = 50.0         # fundamental of the mains hum [Hz]
-NOTCH_N_HARMONICS = 3           # 3 -> 50, 100, 150 Hz
-NOTCH_BW_HZ      = 1.0          # -3 dB width of each notch [Hz] (narrower = less
+LP_ENABLE        = True         # low-pass
+LP_CUTOFF_HZ     = 25.0         # -3 dB corner [Hz]
+LP_ORDER         = 8            # Butterworth order (higher = steeper)
+
+NOTCH_ENABLE     = False         # mains hum removal
+#NOTCH_FREQ_HZ    = 50.0         # fundamental of the mains hum [Hz]
+#NOTCH_N_HARMONICS = 3           # 3 -> 50, 100, 150 Hz
+#NOTCH_BW_HZ      = 1.0          # -3 dB width of each notch [Hz] (narrower = less
                                 # damage to nearby signal, but needs stable mains frequency)
 
 # ---- Spectral estimation ----------------------------------------------------
@@ -67,7 +71,7 @@ OVERLAP       = 0.5             # segment overlap, 0 ... <1
 WINDOW        = 'hann'          # any scipy.signal window name
 DETREND       = 'constant'      # 'constant', 'linear' or False
 FMIN          = 1.0             # plotted frequency range [Hz]
-FMAX          = 100.0
+FMAX          = 25.0
 SPEC_AVG_SEC  = 60.0            # time resolution of the dynamic spectrum [s]
                                 # (PSD segments are averaged within these bins)
 
@@ -101,6 +105,9 @@ def design_filter():
     if HP_ENABLE:
         sections.append(signal.butter(HP_ORDER, HP_CUTOFF_HZ, btype='highpass',
                                       fs=FS, output='sos'))
+    if LP_ENABLE:
+        sections.append(signal.butter(LP_ORDER, LP_CUTOFF_HZ, btype='lowpass',
+                                      fs=FS, output='sos'))        
     if NOTCH_ENABLE:
         for k in range(1, NOTCH_N_HARMONICS + 1):
             f0 = NOTCH_FREQ_HZ * k
