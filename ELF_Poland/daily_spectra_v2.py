@@ -48,7 +48,7 @@ from Calibrate_HYL import calibrate_hyl
 # =============================================================================
 
 # ---- Input / output ---------------------------------------------------------
-DATA_ROOT   = 'test_backyard'   # folder containing the YYYYMMDD directories
+DATA_ROOT   = 'egzotakert'   # folder containing the YYYYMMDD directories
 OUTPUT_DIR  = DATA_ROOT         # base output folder (relative paths are taken relative
                                 # to the folder of this script)
 SUBDIR_SPECTRA      = 'spectra'
